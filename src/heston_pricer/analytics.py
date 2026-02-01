@@ -43,43 +43,77 @@ class BlackScholesPricer:
     
 class HestonAnalyticalPricer:
     """
-    Semi-analytic Heston European Pricing. ('The Volatility Surface: A Practitioners Guide, Jim Gatheral, CH2 p.16-18'). 
+    Semi-analytic Heston European Pricing.
+    Implements Albrecher (2007) stable forms to avoid the 'Heston Trap'.
     """
     @staticmethod
     def price_european_call(S0, K, T, r, q, kappa, theta, xi, rho, v0):
-        # Heston Characteristic Function (Heston, 1993)
+        # 1. Parameter constraints for numerical stability
+        # Prevent zero-division or instability in extreme skew regimes
+        xi = max(xi, 1e-4)
+        
         def heston_char_func(u):
+            # Albrecher (2007) Stable Form
+            # d: root with positive real part (numpy.sqrt ensures this for complex inputs)
             d = np.sqrt((rho * xi * u * 1j - kappa)**2 + xi**2 * (u * 1j + u**2))
+            
+            # g (auxiliary variable)
+            # The choice of d (Re(d)>0) ensures |g| <= 1 usually, but we must handle the log carefully
             g = (kappa - rho * xi * u * 1j - d) / (kappa - rho * xi * u * 1j + d)
             
+            # Characteristic Function Exponents
             C = (1/xi**2) * (1 - np.exp(-d * T)) / (1 - g * np.exp(-d * T)) * \
                 (kappa - rho * xi * u * 1j - d)
                 
-            D = (kappa * theta / xi**2) * \
-                ((kappa - rho * xi * u * 1j - d) * T - 2 * np.log((1 - g * np.exp(-d * T)) / (1 - g)))
+            # STABLE D CALCULATION:
+            # Split the log to avoid the branch cut of the quotient np.log(A/B)
+            # D = (kappa*theta/xi^2) * [ ... - 2*ln((1-g*e^-dT)/(1-g)) ] <-- Unstable
+            val_num = 1 - g * np.exp(-d * T)
+            val_denom = 1 - g
             
-            # dividend adjustment 
+            # Separating logs avoids the spiral crossing the branch cut of the quotient
+            D = (kappa * theta / xi**2) * \
+                ((kappa - rho * xi * u * 1j - d) * T - 2 * (np.log(val_num) - np.log(val_denom)))
+            
+            # Dividend/Risk-free adjustment (Drift)
             drift_term = 1j * u * np.log(S0 * np.exp((r - q) * T))
             
             return np.exp(C * v0 + D + drift_term)
 
-        # Integration 
-        limit = 950
+        # 2. Dynamic Integration Limit based on Maturity
+        # Short maturities require larger u to decay.
+        # Approx rule: u_max ~ 100 / (xi * T)
+        # We cap it to avoid performance kills, but 950 is too low for T < 0.1
+        inv_T = 1.0 / max(T, 1e-4)
+        upper_bound = max(1000.0, 150.0 * inv_T) * 2
+        upper_bound = min(upper_bound, 50000.0) # Safety cap
         
+        # 3. Integrands with Singularity Handling (u=0)
         def integrand_p1(u):
+            # P1 uses phi(u - i)
             num = np.exp(-1j * u * np.log(K)) * heston_char_func(u - 1j)
-            denom = 1j * u * S0 * np.exp((r - q) * T) 
+            denom = 1j * u * S0 * np.exp((r - q) * T)
             return np.real(num / denom)
             
         def integrand_p2(u):
+            # P2 uses phi(u)
             num = np.exp(-1j * u * np.log(K)) * heston_char_func(u)
             denom = 1j * u
             return np.real(num / denom)
             
-        P1 = 0.5 + (1/np.pi) * integrate.quad(integrand_p1, 0, 950, limit=limit)[0]
-        P2 = 0.5 + (1/np.pi) * integrate.quad(integrand_p2, 0, 950, limit=limit)[0]
-        
-        return S0 * np.exp(-q * T) * P1 - K * np.exp(-r * T) * P2
+        # 4. Integration
+        # ERROR FIX: Start at 1e-8, not 0, to avoid ZeroDivisionError/NaN at the limit
+        # 'limit' is the max number of subdivisions. 500 is usually plenty if the function is continuous.
+        try:
+            P1 = 0.5 + (1/np.pi) * integrate.quad(integrand_p1, 1e-8, upper_bound, limit=3000)[0]
+            P2 = 0.5 + (1/np.pi) * integrate.quad(integrand_p2, 1e-8, upper_bound, limit=3000)[0]
+        except Exception:
+            # Fallback if integration fails (e.g. extreme parameters)
+            return max(S0 - K, 0.0) # Intrinsic
+
+        # 5. Final Assembly
+        price = S0 * np.exp(-q * T) * P1 - K * np.exp(-r * T) * P2
+        return max(price, 0.0)
 
     @staticmethod
     def price_european_put(S0, K, T, r, q, kappa, theta, xi, rho, v0):

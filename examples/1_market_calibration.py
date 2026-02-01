@@ -5,9 +5,8 @@ import shutil
 import numpy as np
 import pandas as pd
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List
-from scipy.interpolate import interp1d
 
 # Local package imports
 try:
@@ -22,29 +21,10 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 # -----------------------------
-# UTILITY: FLATTEN DIVIDEND CURVE
-# -----------------------------
-def flatten_dividend_curve(q_curve: SimpleYieldCurve) -> SimpleYieldCurve:
-    """
-    Converts a maturity-dependent q_curve into a single flat yield,
-    weighted towards the short end to match SPX hedging priorities.
-    """
-    tenors = np.array(q_curve.tenors)
-    rates = np.array(q_curve.rates)
-    
-    # Short-tenor weighted average (more influence on front options)
-    weights = np.exp(-tenors)
-    q_bar = np.average(rates, weights=weights)
-    
-    # Return a flat curve over 0-100 years (effectively constant)
-    return SimpleYieldCurve([0.0, 100.0], [q_bar, q_bar])
-
-# -----------------------------
 # RISK-FREE RATE CURVE
 # -----------------------------
 def fetch_dynamic_risk_free_curve():
     log("Fetching Dynamic US Treasury Curve + 40bps Spread...")
-    
     try:
         tickers = ["^IRX", "^FVX", "^TNX", "^TYX"]
         df = yf.download(tickers, period="5d", progress=False)['Close']
@@ -61,7 +41,6 @@ def fetch_dynamic_risk_free_curve():
         
         target_tenors = [0.08, 0.25, 0.5, 1.0, 2.0, 3.0]
         final_rates = []
-        
         for t in target_tenors:
             if t <= 0.25:
                 r = rates_map[0.25]
@@ -71,23 +50,20 @@ def fetch_dynamic_risk_free_curve():
             else:
                 r = rates_map[5.0]
             final_rates.append(r)
-            
         return SimpleYieldCurve(target_tenors, final_rates)
-
     except Exception as e:
         log(f"Dynamic rate fetch failed ({e}). Using fallback 4.2% flat.")
         return SimpleYieldCurve([0.1, 3.0], [0.042, 0.042])
 
 # -----------------------------
-# IMPLIED DIVIDEND CURVE (OLD) + FLATTENED
+# IMPLIED DIVIDEND CURVE (TERM-STRUCTURED)
 # -----------------------------
 def extract_implied_dividends(ticker_symbol, S0, r_curve):
     """
-    For indexes (^SPX), extract parity-based dividends,
-    then flatten to a single effective yield.
+    Extracts maturity-dependent implied dividends for indices (^SPX) 
+    using Put-Call Parity. Returns a non-flattened yield curve.
     """
     log(f"Extracting implied dividends for {ticker_symbol}...")
-    
     is_index = ticker_symbol.startswith("^")
     
     if not is_index:
@@ -102,42 +78,37 @@ def extract_implied_dividends(ticker_symbol, S0, r_curve):
         try:
             d = datetime.strptime(exp_str, "%Y-%m-%d")
             T = (d - today).days / 365.25
-            if not (0.1 <= T <= 2.5):
+            if not (0.05 <= T <= 3.0):
                 continue
 
             r = r_curve.get_rate(T)
             chain = ticker.option_chain(exp_str)
-            
             calls = {row['strike']: (row['bid'] + row['ask'])/2 for _, row in chain.calls.iterrows() if row['bid'] > 0}
             puts = {row['strike']: (row['bid'] + row['ask'])/2 for _, row in chain.puts.iterrows() if row['bid'] > 0}
             common_strikes = set(calls.keys()).intersection(set(puts.keys()))
             
             implied_qs = []
             for K in common_strikes:
-                if 0.98 <= K/S0 <= 1.02:
+                if 0.95 <= K/S0 <= 1.05:
                     C, P = calls[K], puts[K]
                     lhs = (C - P + K * np.exp(-r*T)) / S0
                     if lhs > 0:
                         q_val = -np.log(lhs)/T
-                        if -0.01 < q_val < 0.06:
+                        if -0.02 < q_val < 0.10:
                             implied_qs.append(q_val)
             if implied_qs:
-                candidates.append({'T': T, 'q_raw': np.mean(implied_qs), 'count': len(implied_qs)})
-        except:
+                candidates.append({'T': T, 'q_raw': np.mean(implied_qs)})
+        except Exception:
             continue
 
     if not candidates:
         return _calculate_historical_yield(ticker_symbol, S0)
 
-    tenors = [c['T'] for c in candidates if c['count'] > 0]
-    rates = [c['q_raw'] for c in candidates if c['count'] > 0]
-
-    # Flatten the curve
-    raw_curve = SimpleYieldCurve(tenors, rates)
-    flat_curve = flatten_dividend_curve(raw_curve)
-    
-    print(f"\nFlattened Dividend Yield: {flat_curve.rates[0]:.4%}")
-    return flat_curve
+    candidates.sort(key=lambda x: x['T'])
+    tenors = [c['T'] for c in candidates]
+    rates = [c['q_raw'] for c in candidates]
+    log(f"Generated term-structured dividend curve with {len(tenors)} tenors.")
+    return SimpleYieldCurve(tenors, rates)
 
 def _calculate_historical_yield(ticker_symbol, S0):
     try:
@@ -200,16 +171,17 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, res_mc, options, init_gu
         iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, opt.maturity, r_T, q_T, opt.option_type)
 
         rows.append({
-            "Type": opt.option_type, "T": opt.maturity, "K": opt.strike, "Mkt": opt.market_price, 
+            "Type": opt.option_type, "T": round(opt.maturity, 3), "K": opt.strike, "Mkt": opt.market_price, 
             "Ana": round(p_ana, 2), "Err_A": round(p_ana - opt.market_price, 2),
             "MC": round(p_mc, 2), "Err_MC": round(p_mc - opt.market_price, 2),
-            "IV_Mkt": iv_mkt, "r_used": round(r_T, 4), "q_used": round(q_T, 4)
+            "IV_Mkt": round(iv_mkt, 4), "r_used": round(r_T, 4), "q_used": round(q_T, 4)
         })
 
     df = pd.DataFrame(rows)
-    print(df[["Type", "T", "K", "Mkt", "Ana", "Err_A", "MC", "Err_MC"]].to_string(index=False))
+    # Printed table now explicitly includes r_used and q_used
+    print(df[["Type", "T", "K", "Mkt", "Ana", "Err_A", "r_used", "q_used"]].to_string(index=False))
     df.to_csv(f"{base_name}_prices.csv", index=False)
-    print(f"\n-> Saved results to {base_name}_prices.csv")
+    log(f"Saved results to {base_name}_prices.csv")
 
 # -----------------------------
 # UTILITY: CLEAR CACHE
@@ -236,32 +208,25 @@ def main():
     options.sort(key=lambda x: (x.maturity, x.strike))
     log(f"Target: {ticker} (S0={S0:.2f}) | N={len(options)}")
     
-    # 1. Rate Curve
     r_curve = fetch_dynamic_risk_free_curve()
-
-    # 2. Dividend Curve (flattened)
     q_curve = extract_implied_dividends(ticker, S0, r_curve)
 
-    # 3. Calibrators
     cal_ana = HestonCalibrator(S0, r_curve=r_curve, q_curve=q_curve)
     
     max_maturity = options[-1].maturity if options else 1.0
     n_steps_mc = max(int(max_maturity * 252), 50)
     
     log(f"Monte Carlo Config: 30,000 Paths | {n_steps_mc} Steps (Daily Resolution)")
-
     cal_mc = HestonCalibratorMC(S0, r_curve=r_curve, q_curve=q_curve, n_paths=30_000, n_steps=n_steps_mc)
     
     init_guess = [2.0, 0.025, 0.1, -0.5, 0.015] 
 
-    # --- Analytical Calibration ---
     t0 = time.time()    
     res_ana = cal_ana.calibrate(options, init_guess)
     avg_mkt_price = np.mean([o.market_price for o in options])
     rmse_p_ana = np.sqrt(res_ana['fun'] / len(options))
     log(f"Analytical: rmse={rmse_p_ana:.4f} ({rmse_p_ana/avg_mkt_price:.2%}) , IV-rmse={res_ana['rmse_iv']:.4f} ({res_ana['rmse_iv']:.2%}) ({time.time()-t0:.2f}s)") 
     
-    # --- Monte Carlo Calibration ---
     t1 = time.time()
     try:
         res_mc = cal_mc.calibrate(options, init_guess)

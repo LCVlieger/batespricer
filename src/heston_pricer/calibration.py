@@ -119,7 +119,7 @@ class HestonCalibrator:
         result = minimize(
             objective, x0, method='L-BFGS-B', bounds=bounds,
             callback=callback,
-            tol=1e-7, options={'ftol': 1e-7, 'eps': 1e-7, 'maxiter': 100}
+            tol=1e-8, options={'ftol': 1e-8, 'eps': 1e-5, 'maxiter': 100}
         )
         
         # Final Stats calculation
@@ -255,7 +255,7 @@ class HestonCalibratorMC:
                 moneyness = np.log(opt.strike / self.S0)
                 wing_weight = 1.0 + 5.0 * (moneyness**2)
                 
-                relative_error = (model_p - opt.market_price) / (opt.market_price + 1e-5)
+                relative_error = (model_p - opt.market_price) / (opt.market_price + 1e-8)
                 total_error += wing_weight * (relative_error**2)
 
         return total_error + penalty
