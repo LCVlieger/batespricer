@@ -4,7 +4,8 @@ import os
 import shutil
 import numpy as np
 import pandas as pd
-from datetime import datetime
+import yfinance as yf
+from datetime import datetime, timedelta
 
 # Local package imports
 try:
@@ -15,33 +16,92 @@ try:
 except ImportError:
     raise ImportError("heston_pricer package not found. Ensure PYTHONPATH is set correctly.")
 
+def log(msg):
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+
+def fetch_dynamic_risk_free_curve():
+    """
+    Fetches live US Treasury yields (13wk, 5yr, 10yr, 30yr) from Yahoo Finance
+    and adds a 40bps 'hedging spread' to approximate the OIS/Box rate used
+    by options market makers.
+    """
+    log("Fetching Dynamic US Treasury Curve + 40bps Spread...")
+    
+    try:
+        # Tickers: ^IRX (13wk), ^FVX (5yr), ^TNX (10yr), ^TYX (30yr)
+        tickers = ["^IRX", "^FVX", "^TNX", "^TYX"]
+        df = yf.download(tickers, period="5d", progress=False)['Close']
+        
+        # Get latest available data (handle potential NaNs)
+        latest = df.iloc[-1]
+        if latest.isnull().any():
+            latest = df.dropna().iloc[-1]
+
+        # Yahoo provides rates as integers (e.g., 4.15 for 4.15%). Convert to float.
+        # Add 0.0040 (40bps) for financing spread.
+        rates_map = {
+            0.25: (float(latest['^IRX']) / 100.0) + 0.0040,
+            5.0:  (float(latest['^FVX']) / 100.0) + 0.0040,
+            10.0: (float(latest['^TNX']) / 100.0) + 0.0040,
+            30.0: (float(latest['^TYX']) / 100.0) + 0.0040
+        }
+        
+        # Linear Interpolation for our target tenors
+        target_tenors = [0.08, 0.25, 0.5, 1.0, 2.0, 3.0]
+        final_rates = []
+        
+        for t in target_tenors:
+            if t <= 0.25:
+                # Flat extrapolation for very short end
+                r = rates_map[0.25]
+            elif t <= 5.0:
+                # Interpolate between 3M (0.25) and 5Y (5.0)
+                ratio = (t - 0.25) / (5.0 - 0.25)
+                r = rates_map[0.25] + ratio * (rates_map[5.0] - rates_map[0.25])
+            else:
+                r = rates_map[5.0] # Cap at 5Y for this model
+            
+            final_rates.append(r)
+            
+        return SimpleYieldCurve(target_tenors, final_rates)
+
+    except Exception as e:
+        log(f"Dynamic rate fetch failed ({e}). Reverting to hardcoded fallback.")
+        # Fallback: Approx 4.2% flat
+        return SimpleYieldCurve([0.1, 3.0], [0.042, 0.042])
+
 def extract_implied_dividends(ticker_symbol, S0, r_curve):
     """
-    REVISED: Fetches RAW chains to find Put-Call pairs for Parity.
-    This bypasses the OTM-only filter to find matching strikes.
+    SMART DIVIDEND LOGIC:
+    1. If Index (^SPX): Use Put-Call Parity (European Options).
+    2. If Stock (NVDA): Calculate manually from Trailing 12M Dividend History.
     """
-    import yfinance as yf
     log(f"Extracting Implied Dividend Curve for {ticker_symbol}...")
+    
+    # --- LOGIC SWITCH ---
+    is_index = ticker_symbol.startswith("^")
+    
+    if not is_index:
+        # For Single Stocks (American Options), Parity is biased. 
+        # Calculate yield from actual payment history.
+        return _calculate_historical_yield(ticker_symbol, S0)
+
+    # --- European Parity Logic (For Indexes) ---
     ticker = yf.Ticker(ticker_symbol)
     expirations = ticker.options
     today = datetime.now()
     
-    q_tenors, q_rates = [], []
-
-    print(f"\n{'Maturity':<10} {'Rate(r)':<10} {'Implied(q)':<12} {'Pairs':<5}")
-    print("-" * 45)
+    candidates = []
 
     for exp_str in expirations:
         try:
             d = datetime.strptime(exp_str, "%Y-%m-%d")
             T = (d - today).days / 365.25
-            # Scan within the calibration window
-            if not (0.1 <= T <= 3.0): continue 
+            if not (0.1 <= T <= 2.5): continue 
 
             r = r_curve.get_rate(T)
             chain = ticker.option_chain(exp_str)
             
-            # Use mid-prices from raw chains for parity calculation
             calls = {row['strike']: (row['bid'] + row['ask'])/2 for _, row in chain.calls.iterrows() if row['bid'] > 0}
             puts = {row['strike']: (row['bid'] + row['ask'])/2 for _, row in chain.puts.iterrows() if row['bid'] > 0}
             
@@ -49,29 +109,76 @@ def extract_implied_dividends(ticker_symbol, S0, r_curve):
             implied_qs = []
 
             for K in common_strikes:
-                # Target ATM region (0.90 - 1.10) for extraction stability
-                if 0.90 <= K/S0 <= 1.10:
+                # Very Tight ATM for Parity
+                if 0.98 <= K/S0 <= 1.02:
                     C, P = calls[K], puts[K]
-                    # Put-Call Parity solution for q
+                    # Parity: S*e^-qT = C - P + K*e^-rT
                     lhs = (C - P + K * np.exp(-r * T)) / S0
                     if lhs > 0:
-                        implied_qs.append(-np.log(lhs) / T)
+                        q_val = -np.log(lhs) / T
+                        # Sanity Check (Indices usually 0.5% - 2.5%)
+                        if -0.01 < q_val < 0.06:
+                            implied_qs.append(q_val)
 
             if implied_qs:
-                avg_q = np.mean(implied_qs)
-                q_tenors.append(T)
-                q_rates.append(avg_q)
-                print(f"{T:<10.4f} {r:<10.4f} {avg_q:<12.4%} {len(implied_qs):<5}")
-        except:
-            continue
+                candidates.append({
+                    'T': T, 
+                    'r': r, 
+                    'q_raw': np.mean(implied_qs), 
+                    'count': len(implied_qs)
+                })
+        except: continue
 
-    # Final logic: return curve or fallback
-    if not q_rates:
-        log("Dividend extraction failed. Using fallback (0.011 for SPX, 0.0005 else).")
-        val = 0.011 if ticker_symbol == "^SPX" else 0.0005
-        return SimpleYieldCurve([0.1, 2.5], [val, val])
+    if not candidates:
+        return _calculate_historical_yield(ticker_symbol, S0)
+
+    # Filter & Construct
+    valid_tenors = []
+    valid_rates = []
+    
+    print(f"\n{'T':<8} {'Mode':<8} {'Rate(r)':<10} {'Imp(q)':<10}")
+    print("-" * 45)
+    
+    for c in candidates:
+        if c['count'] >= 1:
+            valid_tenors.append(c['T'])
+            valid_rates.append(c['q_raw'])
+            print(f"{c['T']:<8.4f} {'Parity':<8} {c['r']:<10.4%} {c['q_raw']:<10.4%}")
+
+    if not valid_tenors: return _calculate_historical_yield(ticker_symbol, S0)
+
+    return SimpleYieldCurve(valid_tenors, valid_rates)
+
+def _calculate_historical_yield(ticker_symbol, S0):
+    """
+    Calculates dividend yield by summing actual dividends paid 
+    over the trailing 12 months.
+    """
+    try:
+        log(f"Detected American Asset. Calculating yield from history...")
+        ticker = yf.Ticker(ticker_symbol)
         
-    return SimpleYieldCurve(q_tenors, q_rates)
+        # Get dividends
+        divs = ticker.dividends
+        
+        if divs.empty:
+             log("-> No dividend history found. Assuming 0%.")
+             return SimpleYieldCurve([0.1, 5.0], [0.0, 0.0])
+             
+        # Filter for Last 365 Days
+        one_year_ago = pd.Timestamp.now(tz=divs.index.tz) - pd.Timedelta(days=365)
+        recent_divs = divs[divs.index >= one_year_ago]
+        
+        total_payout = recent_divs.sum()
+        q = total_payout / S0
+        
+        log(f"-> Calc: ${total_payout:.2f} (Trailing 12m) / ${S0:.2f} = {q:.4%}")
+        
+    except Exception as e:
+        log(f"-> Calculation failed ({e}). Defaulting to 0%.")
+        q = 0.0
+    
+    return SimpleYieldCurve([0.1, 5.0], [q, q])
 
 def save_results(ticker, S0, r_curve, q_curve, res_ana, res_mc, options, init_guess):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -124,9 +231,6 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, res_mc, options, init_gu
     df.to_csv(f"{base_name}_prices.csv", index=False)
     print(f"\n-> Saved results to {base_name}_prices.csv")
 
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
-
 def clear_numba_cache():
     for root, dirs, files in os.walk("src"):
         for d in dirs:
@@ -137,7 +241,7 @@ def main():
     clear_numba_cache()
     os.makedirs("results", exist_ok=True)
     
-    ticker = "^SPX" 
+    ticker = "NVDA" 
     options, S0 = fetch_options(ticker)
     if not options:
         log(f"No liquidity for {ticker}")
@@ -146,12 +250,10 @@ def main():
     options.sort(key=lambda x: (x.maturity, x.strike))
     log(f"Target: {ticker} (S0={S0:.2f}) | N={len(options)}")
     
-    # 1. Rate Curve
-    tenors = [0.08, 0.25, 0.5, 1.0, 2.0, 3.0]
-    rates  = [0.0415, 0.0405, 0.0395, 0.0385, 0.0390, 0.0400]#[0.035, 0.034, 0.033, 0.032, 0.032, 0.033] #[0.0415, 0.0405, 0.0395, 0.0385, 0.0390, 0.0400]
-    r_curve = SimpleYieldCurve(tenors, rates)
+    # 1. Rate Curve: Dynamic Fetch from Market
+    r_curve = fetch_dynamic_risk_free_curve()
 
-    # 2. Implied Dividend Curve (RAW SCAN)
+    # 2. Implied Dividend Curve: Smart Switch (Parity for Index, Manual Calc for Stocks)
     q_curve = extract_implied_dividends(ticker, S0, r_curve)
 
     # 3. Setup Calibrators

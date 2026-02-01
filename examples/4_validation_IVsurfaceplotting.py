@@ -18,15 +18,6 @@ except ImportError:
     from heston_pricer.calibration import implied_volatility, HestonCalibrator, SimpleYieldCurve
     from heston_pricer.analytics import HestonAnalyticalPricer
 
-"""
-4_visualize_surface.py (Portfolio Final)
-----------------------
-1. Loads existing calibration.
-2. Compares Analytical vs Monte Carlo performance (selects Best).
-3. Refines calibration using the Best parameters.
-4. Generates the final, honest, publication-grade plot.
-"""
-
 class ReconstructedOption:
     def __init__(self, strike, maturity, price, option_type="CALL"):
         self.strike = float(strike)
@@ -35,7 +26,6 @@ class ReconstructedOption:
         self.option_type = str(option_type)
 
 def load_latest_calibration():
-    # Look for meta files
     patterns = ['results/calibration_*_meta.json', 'calibration_*_meta.json']
     files = []
     for p in patterns: files.extend(glob.glob(p))
@@ -48,15 +38,17 @@ def load_latest_calibration():
     
     with open(latest_meta, 'r') as f: data = json.load(f)
     
-    # --- Reconstruct SimpleYieldCurve from JSON Dict ---
-    curve_data = data['market']['r']
-    if isinstance(curve_data, dict):
-        r_curve = SimpleYieldCurve(curve_data['tenors'], curve_data['rates'])
-    else:
-        # Fallback for old scalar format
-        r_curve = SimpleYieldCurve([0.0, 30.0], [float(curve_data), float(curve_data)])
+    def reconstruct_curve(curve_data):
+        if isinstance(curve_data, dict) and 'tenors' in curve_data:
+            return SimpleYieldCurve(curve_data['tenors'], curve_data['rates'])
+        else:
+            val = float(curve_data)
+            return SimpleYieldCurve([0.0, 30.0], [val, val])
 
-    # --- Load Market Prices ---
+    # Reconstruct both curves to avoid float-dict operand errors
+    r_curve = reconstruct_curve(data['market']['r'])
+    q_curve = reconstruct_curve(data['market']['q'])
+
     csv_file = f"{base_name}_prices.csv"
     market_options = []
     if os.path.exists(csv_file):
@@ -65,18 +57,12 @@ def load_latest_calibration():
             otype = row['Type'] if 'Type' in row else "CALL"
             market_options.append(ReconstructedOption(row['K'], row['T'], row['Mkt'], otype))
 
-    return data, r_curve, market_options, base_name
+    return data, r_curve, q_curve, market_options, base_name
 
 def select_best_parameters(data):
-    """
-    Compares Analytical and Monte Carlo results (if available)
-    and returns the set with the lowest objective function value ('fun').
-    """
     res_ana = data.get('analytical', {})
-    # Check both potential key names for MC
     res_mc = data.get('monte_carlo', data.get('monte_carlo_results', {}))
 
-    # Helper to safely get error metric (lower 'fun' is better)
     def get_score(res):
         if not res or 'fun' not in res: return float('inf')
         return res['fun']
@@ -94,69 +80,7 @@ def select_best_parameters(data):
         print("\n[Selection] No valid results found. Using default guess.")
         return {'kappa':2.0, 'theta':0.04, 'xi':0.5, 'rho':-0.7, 'v0':0.04}, "Default"
 
-def refine_calibration(S0, r_curve, q, best_params, market_options):
-    """
-    1. Uses 'best_params' to price options and identify outliers.
-    2. Drops outliers.
-    3. Re-calibrates (polishes) on the clean set.
-    """
-    kappa = best_params['kappa'] 
-    theta = best_params['theta']
-    xi = best_params['xi']
-    rho = best_params['rho']
-    v0 = best_params['v0']
-    
-    # Use best params as the starting point for refinement
-    p_init_vals = [kappa, theta, xi, rho, v0]
-    
-    print(f"[Refinement] Repricing {len(market_options)} options using best parameters...")
-    clean_options = []
-    dropped = 0
-    
-    THRESHOLD = 1.0 # IV difference threshold
-    
-    for opt in market_options:
-        try:
-            r_T = r_curve.get_rate(opt.maturity)
-
-            if opt.option_type == "PUT":
-                p_mod = HestonAnalyticalPricer.price_european_put(
-                    S0, opt.strike, opt.maturity, r_T, q, kappa, theta, xi, rho, v0
-                )
-            else:
-                p_mod = HestonAnalyticalPricer.price_european_call(
-                    S0, opt.strike, opt.maturity, r_T, q, kappa, theta, xi, rho, v0
-                )
-            
-            iv_mod = implied_volatility(p_mod, S0, opt.strike, opt.maturity, r_T, q, opt.option_type)
-            iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, opt.maturity, r_T, q, opt.option_type)
-            
-            # Filter invalid IVs
-            if np.isnan(iv_mod) or np.isnan(iv_mkt) or iv_mod <= 0.0 or iv_mkt <= 0.0: 
-                dropped += 1
-                continue
-            
-            # Filter Outliers
-            err = abs(iv_mkt - iv_mod)
-            if err <= THRESHOLD:
-                clean_options.append(opt)
-            else:
-                dropped += 1
-        except Exception:
-            dropped += 1
-            
-    print(f"-> Dropped {dropped} outliers. Re-calibrating on {len(clean_options)} instruments...")
-    
-    # We use the Analytical Calibrator for the final polish (fast & smooth)
-    # seeded with the Best Parameters (even if they came from MC).
-    cal = HestonCalibrator(S0, r_curve, q)
-    t0 = time.time()
-    res_final = cal.calibrate(clean_options, init_guess=p_init_vals)
-    print(f"-> Optimization Complete ({time.time()-t0:.2f}s)")
-    
-    return res_final, clean_options, dropped
-
-def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_options, data_full, dropped_count, source_name):
+def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, market_options, data_full, dropped_count, source_name):
     kappa, theta, xi, rho, v0 = params['kappa'], params['theta'], params['xi'], params['rho'], params['v0']
 
     # --- 1. CONFIGURATION ---
@@ -175,13 +99,15 @@ def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_o
         for j in range(X.shape[1]):
             T_val, M_val = Y[i, j], X[i, j]
             
+            # Extract scalars from yield curves for each grid point
             r_T = r_curve.get_rate(T_val)
+            q_T = q_curve.get_rate(T_val)
 
             price = HestonAnalyticalPricer.price_european_call(
-                S0, S0 * M_val, T_val, r_T, q, kappa, theta, xi, rho, v0
+                S0, S0 * M_val, T_val, r_T, q_T, kappa, theta, xi, rho, v0
             )
             try:
-                iv = implied_volatility(price, S0, S0 * M_val, T_val, r_T, q, "CALL")
+                iv = implied_volatility(price, S0, S0 * M_val, T_val, r_T, q_T, "CALL")
                 Z[i, j] = iv if 0.01 < iv < 2.5 else np.nan
             except:
                 Z[i, j] = np.nan
@@ -191,14 +117,14 @@ def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_o
         Z = pd.DataFrame(Z).interpolate(method='linear', axis=1).ffill(axis=1).bfill(axis=1).values
     Z_smooth = gaussian_filter(Z, sigma=0.8)
 
-    # --- 3. PLOTTING ---
+    # --- 3. PLOTTING (Exact Aesthetic Match) ---
     with plt.style.context('dark_background'):
         fig = plt.figure(figsize=(14, 10))
         ax = fig.add_subplot(111, projection='3d')
 
         surf = ax.plot_surface(X, Y, Z_smooth, cmap=cm.RdYlBu_r, 
                                rcount=100, ccount=100,  
-                               edgecolor='black', linewidth=0.085, alpha=0.8,                       
+                               edgecolor='black', linewidth=0.085, alpha=0.8,                      
                                shade=False, antialiased=True, zorder=1)
 
         if market_options:
@@ -211,8 +137,9 @@ def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_o
             for opt in plot_opts:
                 m_mkt, t_mkt = opt.strike / S0, opt.maturity
                 try:
-                    r_T = r_curve.get_rate(opt.maturity)
-                    iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, opt.maturity, r_T, q, opt.option_type)
+                    r_T_mkt = r_curve.get_rate(t_mkt)
+                    q_T_mkt = q_curve.get_rate(t_mkt)
+                    iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, opt.option_type)
                     if iv_mkt < 0.01 or iv_mkt > 2.5: continue
                 except: continue
 
@@ -239,8 +166,7 @@ def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_o
         ax.dist = 11
         ax.set_xlim(LOWER_M, UPPER_M)
         ax.set_ylim(UPPER_T, LOWER_T) 
-        #ax.set_zlim(0.315, 0.665) 
-
+        ax.set_zlim(0.35, 0.65) 
         ax.xaxis.set_pane_color((1, 1, 1, 0))
         ax.yaxis.set_pane_color((1, 1, 1, 0))
         ax.zaxis.set_pane_color((1, 1, 1, 0))
@@ -268,9 +194,6 @@ def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_o
         )
         print("\n" + comparison_text)
         
-        # Optional: Add text to plot (commented out to keep clean)
-        # fig.text(0.15, 0.75, comparison_text, color='white', fontsize=8, family='monospace')
-
         ax.set_xlabel('Moneyness ($K/S_0$)', color='white', labelpad=10)
         ax.set_ylabel('Maturity ($T$ Years)', color='white', labelpad=10)
         ax.set_zlabel(r'Implied Volatility (%)', color='white', labelpad=10)
@@ -289,38 +212,17 @@ def plot_surface_professional(S0, r_curve, q, params, ticker, filename, market_o
 
 def main():
     try:
-        # 1. Load Data
-        data, r_curve, market_options, base_name = load_latest_calibration()
-        S0, q = data['market']['S0'], data['market']['q']
+        data, r_curve, q_curve, market_options, base_name = load_latest_calibration()
+        S0 = data['market']['S0']
         
-        # 2. Select BEST parameters (MC vs Analytical)
         best_params, source_name = select_best_parameters(data)
-        
         ticker = base_name.split("calibration_")[1].split("_")[0] if "calibration_" in base_name else "Asset"
         
-        # 3. Conditional Refinement
-        # Logic: If MC won, the parameters are likely from a global optimizer (Diff Evol).
-        # We use them as a starting point for the Analytical Calibrator (Local/Gradient) to polish the fit.
-        
-        final_options = market_options
-        dropped_count = 0
-
-        #if source_name == "Monte Carlo":
-        #    print(f"\n[Refinement Triggered] Best parameters are from {source_name}.")
-        #    print("-> Passing MC parameters into Analytical Gradient Descent for final polish...")
-        #    
-        #    # Run the refinement (Reprice -> Drop Outliers -> Analytical Calibration)
-        #    best_params, final_options, dropped_count = refine_calibration(S0, r_curve, q, best_params, market_options)
-        #    
-        #    source_name = "MC + Analytical Polish"
-        #else:
         print(f"\n[Direct Plot] Using {source_name} parameters directly (skipping refinement).")
         
-        # 4. Plot
-        # Note: We pass 'final_options' so the plot only shows the "clean" needles if refinement happened
         plot_surface_professional(
-            S0, r_curve, q, best_params, ticker, base_name, 
-            final_options, data, dropped_count, source_name
+            S0, r_curve, q_curve, best_params, ticker, base_name, 
+            market_options, data, 0, source_name
         )
         
     except Exception as e:

@@ -41,7 +41,7 @@ def fetch_options(ticker_symbol: str, target_size: int = 100) -> Tuple[List[Mark
     MIN_T, MAX_T = 0.46, 2.5 
     
     # Using the optimized 2.65bps (0.000265) we calculated for SPX/NVDA scaling
-    PHI = 0.000265
+    PHI = 0.0005 #265
 
     print("Scanning option chains (filtering junk data)...")
     for exp_str in expirations:
@@ -72,13 +72,14 @@ def fetch_options(ticker_symbol: str, target_size: int = 100) -> Tuple[List[Mark
                 
                 # 1. Anti-Ghost Check
                 dynamic_min_bid = S0 * PHI
+                if bid < dynamic_min_bid: print(dynamic_min_bid)
                 if bid < dynamic_min_bid: continue 
 
                 # 2. Spread Check
-                mid = ask #(bid + ask) / 2.0
-                #spread_ratio = (ask - bid) / mid
-                actual_mid = (bid + ask) / 2.0
-                spread_ratio = (ask - bid) / actual_mid if actual_mid > 0 else 1.0
+                mid = (bid + ask) / 2.0 #ask 
+                spread_ratio = (ask - bid) / mid
+                #actual_mid = (bid + ask) / 2.0
+                #spread_ratio = (ask - bid) / actual_mid if actual_mid > 0 else 1.0
                 if spread_ratio > 0.40: continue 
                 all_candidates.append({
                     'strike': K, 'maturity': T, 'market_price': mid,
@@ -100,7 +101,7 @@ def fetch_options(ticker_symbol: str, target_size: int = 100) -> Tuple[List[Mark
     selected_indices = set()
     
     # Skew Factor: 2.0 = Quadratic (Standard), 3.0 = Cubic (Very ATM heavy)
-    SKEW_POWER = 1.5
+    SKEW_POWER = 0.75
     
     print(f"Stratifying {len(unique_maturities)} maturities with Quadratic ATM Skew...")
     

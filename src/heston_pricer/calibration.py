@@ -105,7 +105,7 @@ class HestonCalibrator:
                 
                 # 2. Moneyness Weighting
                 moneyness = np.log(opt.strike / self.S0)
-                wing_weight = 1.0 + 2.0 * (moneyness**2)
+                wing_weight = 1.0 + 5.0 * (moneyness**2)
                 
                 # 3. Relative Error
                 relative_error = (model_p - opt.market_price) / (opt.market_price + 1e-5)
@@ -253,7 +253,7 @@ class HestonCalibratorMC:
                 model_p = m_prices[i]
                 
                 moneyness = np.log(opt.strike / self.S0)
-                wing_weight = 1.0 + 1.0 * (moneyness**2)
+                wing_weight = 1.0 + 5.0 * (moneyness**2)
                 
                 relative_error = (model_p - opt.market_price) / (opt.market_price + 1e-5)
                 total_error += wing_weight * (relative_error**2)
