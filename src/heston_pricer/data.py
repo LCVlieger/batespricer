@@ -38,7 +38,7 @@ def fetch_options(ticker_symbol: str, target_size: int = 100) -> Tuple[List[Mark
     today = datetime.now()
     
     all_candidates = []
-    MIN_T, MAX_T = 0.46, 2.5 
+    MIN_T, MAX_T = 0.1, 2.5 
     
     # Using the optimized 2.65bps (0.000265) we calculated for SPX/NVDA scaling
     PHI = 0.0005 #265
@@ -72,7 +72,7 @@ def fetch_options(ticker_symbol: str, target_size: int = 100) -> Tuple[List[Mark
                 
                 # 1. Anti-Ghost Check
                 dynamic_min_bid = S0 * PHI
-                if bid < dynamic_min_bid: print(dynamic_min_bid)
+                #if bid < dynamic_min_bid: print(dynamic_min_bid)
                 if bid < dynamic_min_bid: continue 
 
                 # 2. Spread Check
