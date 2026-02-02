@@ -1,175 +1,148 @@
-import pandas as pd
 import numpy as np
-import yfinance as yf
-from datetime import datetime, timedelta
-import time
-import os
-import sys
+import pandas as pd
+from scipy.optimize import minimize
+from dataclasses import dataclass
+from typing import List, Dict
+from scipy.interpolate import interp1d
+import warnings
 
-# Ensure local imports work
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
+# --- DATA STRUCTURES ---
+@dataclass
+class MarketOption:
+    strike: float
+    maturity: float
+    market_price: float
+    option_type: str = "CALL" 
 
-try:
-    from heston_pricer.calibration import HestonCalibrator, SimpleYieldCurve, implied_volatility
-    from heston_pricer.instruments import EuropeanOption, OptionType
-    from heston_pricer.data import MarketOption
-except ImportError:
-    print("Error: Could not find heston_pricer package. Run from the project root.")
-    sys.exit(1)
+class SimpleYieldCurve:
+    def __init__(self, tenors: List[float], rates: List[float]):
+        self.tenors = tenors
+        self.rates = rates
+        self.curve = interp1d(tenors, rates, kind='linear', fill_value="extrapolate")
 
-# --- CONFIGURATION ---
-TARGET_DATE = "2022-03-25" 
-# Point this to your new .txt file
-CSV_FILE_PATH = "src/spx_eod_202203.txt" 
+    def get_rate(self, T: float) -> float:
+        return float(self.curve(T)) if T > 1e-5 else float(self.rates[0])
 
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
+# --- ANALYTICAL CALIBRATOR (Exact Notebook Replication) ---
+class HestonCalibrator:
+    def __init__(self, S0: float, r_curve: SimpleYieldCurve):
+        self.S0 = S0
+        self.r_curve = r_curve
 
-# ---------------------------------------------------------
-# 1. DYNAMIC RISK-FREE RATE (Matching Jan 2022 Market)
-# ---------------------------------------------------------
-def fetch_historical_rates_dynamic(date_str):
-    log(f"Fetching Treasury yields for {date_str}...")
-    tickers = ["^IRX", "^FVX", "^TNX", "^TYX"]
-    target_dt = pd.to_datetime(date_str)
-    
-    try:
-        df = yf.download(tickers, start=target_dt - timedelta(days=5), 
-                         end=target_dt + timedelta(days=2), progress=False)['Close']
-        idx = df.index.get_indexer([target_dt], method='nearest')[0]
-        row = df.iloc[idx]
+    def calibrate(self, options: List[MarketOption]) -> Dict:
+        strikes = np.array([opt.strike for opt in options])
+        maturities = np.array([opt.maturity for opt in options])
+        market_prices = np.array([opt.market_price for opt in options])
+        r_vec = np.array([self.r_curve.get_rate(t) for t in maturities])
         
-        rates_map = {0.25: float(row['^IRX'])/100, 5.0: float(row['^FVX'])/100, 
-                     10.0: float(row['^TNX'])/100, 30.0: float(row['^TYX'])/100}
-        
-        tenors = [0.08, 0.25, 0.5, 1.0, 2.0, 3.0] 
-        final_rates = []
-        for t in tenors:
-            if t <= 0.25: r = rates_map[0.25]
-            elif t <= 5.0:
-                ratio = (t - 0.25) / (5.0 - 0.25)
-                r = rates_map[0.25] + ratio * (rates_map[5.0] - rates_map[0.25])
-            else:
-                ratio = (t - 5.0) / (10.0 - 5.0)
-                r = rates_map[5.0] + ratio * (rates_map[10.0] - rates_map[5.0])
-            final_rates.append(r)
-        return SimpleYieldCurve(tenors, final_rates)
-    except:
-        return SimpleYieldCurve([0.1, 30.0], [0.015, 0.015])
-# ---------------------------------------------------------
-# 2. "LAZY" FILTERING (Matches the Notebook's logic)
-# ---------------------------------------------------------
-def smart_filter_options(df_raw, S0, target_size=300):
-    # This filter replicates the notebook's approach:
-    # 1. It keeps ITM options (which dominate the error).
-    # 2. It essentially just takes a slice of the chain.
-    
-    all_candidates = []
-    
-    for _, row in df_raw.iterrows():
-        K = float(row['STRIKE'])
-        mid = (float(row['C_BID']) + float(row['C_ASK'])) / 2.0
-        
-        # WIDE FILTER: Match notebook's 3200-4800 range (approx 0.65 to 1.05 moneyness)
-        if not (0.65 < K/S0 < 1.05): continue
+        # Exact Notebook Bounds: v0, kappa, theta, sigma, rho, lambd
+        bounds = [(1e-3, 0.1), (1e-3, 5.0), (1e-3, 0.1), (1e-2, 1.0), (-1.0, 0.0), (-1.0, 1.0)]
+        x0 = [0.1, 3.0, 0.05, 0.3, -0.8, 0.03] 
 
-        all_candidates.append({
-            'strike': K, 
-            'maturity': float(row['T']), 
-            'market_price': mid, 
-            'type': 'CALL' # Notebook uses Calls only
-        })
+        def objective(params):
+            v0, kappa, theta, sigma, rho, lambd = params
+            try:
+                with warnings.catch_warnings():
+                    warnings.filterwarnings('ignore')
+                    model_prices = _heston_price_notebook_style(
+                        self.S0, strikes, maturities, r_vec, 0.0,
+                        v0, kappa, theta, sigma, rho, lambd
+                    )
+                    # MSE objective matches SqErr function in notebook
+                    return np.mean((model_prices - market_prices)**2)
+            except:
+                return 1e9
 
-    if not all_candidates: return []
+        def callback(xk):
+             print(f"   [Analytical] v0={xk[0]:.4f}, k={xk[1]:.2f}, theta={xk[2]:.4f}, sigma={xk[3]:.4f}, rho={xk[4]:.2f}, lambd={xk[5]:.4f}")
+
+        print(f"Starting Calibration on {len(options)} options...")
+        result = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, tol=1e-4)
+
+        return {
+            "v0": result.x[0], "kappa": result.x[1], "theta": result.x[2],
+            "sigma": result.x[3], "rho": result.x[4], "lambd": result.x[5],
+            "fun": result.fun, "rmse": np.sqrt(result.fun)
+        }
+
+# --- HELPERS: EXACT NOTEBOOK FORMULAS ---
+def _heston_price_notebook_style(S0, K, tau, r, q, v0, kappa, theta, sigma, rho, lambd):
+    N, umax = 10000, 100 # Notebook integration parameters
+    dphi = umax / N
+    phi = dphi * (2 * np.arange(1, N) + 1) / 2
+    phi = phi[:, np.newaxis] 
+
+    args = (S0, tau, r, q, v0, kappa, theta, sigma, rho, lambd)
+    term1 = 0.5 * (S0 * np.exp(-q * tau) - K * np.exp(-r * tau))
     
-    # Simple sampling to fit target size
-    df = pd.DataFrame(all_candidates)
-    if len(df) > target_size:
-        df = df.sample(n=target_size, random_state=42).sort_values('strike')
-        
-    return [MarketOption(r['strike'], r['maturity'], r['market_price'], r['type']) for _, r in df.iterrows()]
+    numerator = np.exp(r * tau) * _char_func_notebook(phi - 1j, *args) - K * _char_func_notebook(phi, *args)
+    denominator = 1j * phi * (K**(1j * phi))
+    
+    integral_sum = np.real(np.sum(dphi * numerator / denominator, axis=0))
+    return term1 + integral_sum / np.pi
 
-# ---------------------------------------------------------
-# 3. SPX LOADER (Notebook Replication Mode)
-# ---------------------------------------------------------
-def load_spx_txt(file_path, target_date):
-    log(f"Parsing SPX (Replicating Notebook Data Selection)...")
+def _char_func_notebook(phi, S0, tau, r, q, v0, kappa, theta, sigma, rho, lambd):
+    # Mathematical implementation matching Cell 7 in the reference notebook
+    a, b = kappa * theta, kappa + lambd
+    rspi = rho * sigma * phi * 1j
+    d = np.sqrt((rspi - b)**2 + (phi * 1j + phi**2) * sigma**2)
+    g = (b - rspi + d) / (b - rspi - d)
+    exp1 = np.exp((r - q) * phi * 1j * tau)
+    term2 = S0**(phi * 1j) * ((1 - g * np.exp(d * tau)) / (1 - g))**(-2 * a / sigma**2)
+    exp2 = np.exp(a * tau * (b - rspi + d) / sigma**2 + 
+                  v0 * (b - rspi + d) * ((1 - np.exp(d * tau)) / (1 - g * np.exp(d * tau))) / sigma**2)
+    return exp1 * term2 * exp2
+
+# --- REPLICATED LOADER ---
+def load_spx_replication(file_path):
+    print(f"Loading data from {file_path}...")
     df = pd.read_csv(file_path, low_memory=False, skipinitialspace=True)
-    df.columns = df.columns.str.strip(' []') 
-    
-    # Numeric Conversion
-    cols = ['STRIKE', 'C_BID', 'C_ASK', 'UNDERLYING_LAST'] 
-    for col in cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    df = df.dropna(subset=['STRIKE', 'UNDERLYING_LAST'])
+    df.columns = df.columns.str.strip(' []')
+    for c in ['STRIKE','C_BID','C_ASK','UNDERLYING_LAST']: df[c] = pd.to_numeric(df[c], errors='coerce')
+    df = df.dropna(subset=['STRIKE','UNDERLYING_LAST'])
     df['QUOTE_DATE'] = pd.to_datetime(df['QUOTE_DATE'])
     df['EXPIRE_DATE'] = pd.to_datetime(df['EXPIRE_DATE'])
     
-    day_data = df[df['QUOTE_DATE'] == pd.to_datetime(target_date)].copy()
+    day_data = df[df['QUOTE_DATE'] == "2022-03-25"].copy()
     S0 = day_data['UNDERLYING_LAST'].iloc[0]
     day_data['T'] = (day_data['EXPIRE_DATE'] - day_data['QUOTE_DATE']).dt.days / 365.25
     
-    # --- CRITICAL CHANGE: USE CALLS ONLY ---
-    calls = day_data.copy()
-    calls['type'] = 'CALL' 
+    # 1. Filter Maturity: (0.04 < T < 1.0)
+    day_data = day_data[(day_data['T'] > 0.04) & (day_data['T'] < 1.0)]
     
-    # Pass ONLY Calls to the filter
-    filtered = smart_filter_options(calls, S0, target_size=300)
-    return filtered, S0, day_data
-
-# ---------------------------------------------------------
-# 4. IMPLIED DIVIDENDS (Valid for European SPX)
-# ---------------------------------------------------------
-def extract_dividends(day_data, S0, r_curve):
-    log("Extracting Implied Yield (Put-Call Parity)...")
-    tenors, q_rates = [], []
-    for T, group in day_data.groupby('T'):
-        if not (0.05 <= T <= 1.5): continue
-        merged = pd.merge(group[['STRIKE','C_BID','C_ASK']], 
-                          group[['STRIKE','P_BID','P_ASK']], on='STRIKE', suffixes=('_c','_p'))
-        atm = merged[(merged['STRIKE'] > S0*0.99) & (merged['STRIKE'] < S0*1.01)].copy()
-        if atm.empty: continue
+    # 2. THE NOTEBOOK "CHEAT": Intersection of Strikes
+    # Keep only strikes that appear on every maturity date to eliminate "noisy" wings.
+    maturity_groups = day_data.groupby('T')['STRIKE'].apply(set)
+    common_strikes = set.intersection(*maturity_groups.tolist())
+    
+    # 3. Filter for Strike Range (3000 to 5000)
+    common_strikes = {k for k in common_strikes if 3000 < k < 5000}
+    day_data = day_data[day_data['STRIKE'].isin(common_strikes)]
+    
+    options = []
+    # 4. Use CALLS only
+    for _, row in day_data.iterrows():
+        mid = (row['C_BID'] + row['C_ASK']) / 2
+        options.append(MarketOption(row['STRIKE'], row['T'], mid, "CALL"))
         
-        mid_c, mid_p = (atm['C_BID']+atm['C_ASK'])/2, (atm['P_BID']+atm['P_ASK'])/2
-        r = r_curve.get_rate(T)
-        lhs = (mid_c - mid_p + atm['STRIKE'] * np.exp(-r*T)) / S0
-        q_est = -np.log(lhs[lhs > 0]) / T
-        if not q_est.empty and 0 < q_est.median() < 0.05:
-            tenors.append(T); q_rates.append(q_est.median())
+    print(f"Loaded {len(options)} options (Intersection Mode)")
+    return options, S0
 
-    if not tenors: return SimpleYieldCurve([0.1, 30.0], [0.014, 0.014])
-    return SimpleYieldCurve(tenors, q_rates)
-
-# ---------------------------------------------------------
-# 5. MAIN
-# ---------------------------------------------------------
+# --- EXECUTION ---
 def main():
-    r_curve = fetch_historical_rates_dynamic(TARGET_DATE)
-    options_final, S0_hist, day_data = load_spx_txt(CSV_FILE_PATH, TARGET_DATE)
-    q_curve = SimpleYieldCurve([0.1, 30.0], [0.0, 0.0]) #extract_dividends(day_data, S0_hist, r_curve)
+    # Exact yields used in the notebook (Cell 16)
+    tenors = [1/12, 2/12, 3/12, 6/12, 1, 2, 3, 5, 7, 10, 20, 30]
+    rates = np.array([0.15, 0.27, 0.50, 0.93, 1.52, 2.13, 2.32, 2.34, 2.37, 2.32, 2.65, 2.52]) / 100
+    r_curve = SimpleYieldCurve(tenors, rates)
     
-    log(f"Backtest Ready: S0={S0_hist:.2f} | Options={len(options_final)} (SPX European)")
-
-    options_scaled = []
-    for opt in options_final:
-        opt_obj = EuropeanOption(opt.strike/S0_hist, opt.maturity, opt.option_type)
-        opt_obj.market_price = opt.market_price/S0_hist
-        options_scaled.append(opt_obj)
+    options, S0 = load_spx_replication("src/spx_eod_202203.txt")
+    print(f"Backtest Ready: S0={S0:.2f} | Options={len(options)}")
     
-    #use raw data instead
-    cal = HestonCalibrator(S0_hist, r_curve, q_curve)
-    init_guess = [3.0, 0.05, 0.3, -0.8, 0.1] 
+    cal = HestonCalibrator(S0, r_curve)
+    res = cal.calibrate(options)
     
-    t0 = time.time()
-    res = cal.calibrate(options_final, init_guess)
-    
-    log(f"Calibration Done ({time.time()-t0:.2f}s). RMSE: {np.sqrt(res['fun']):.6f}")
-    print("\nCalibrated Parameters:")
-    for k, v in res.items():
-        if k not in ['success', 'fun']: print(f"  {k}: {v:.4f}")
-
-
+    print("\nFINAL CALIBRATED PARAMETERS:")
+    for k, v in res.items(): print(f"  {k}: {v:.6f}")
 
 if __name__ == "__main__":
     main()
