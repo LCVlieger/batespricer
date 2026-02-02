@@ -9,3 +9,5 @@ examples/4_validation_IVsurfaceplotting.py
 
 # Exclude historical SPY data
 src/spy_2020_2022.csv
+src/spx_eod_202201.txt
+src/spx_eod_202203.txt
