@@ -8,9 +8,6 @@ from nelson_siegel_svensson.calibrate import calibrate_nss_ols
 import warnings
 import os
 
-FRED_API_KEY = os.getenv("FRED_API_KEY")
-if not FRED_API_KEY:
-    raise ValueError("FRED_API_KEY environment variable not set.")
 # --- DATA STRUCTURES ---
 @dataclass
 class MarketOption:
@@ -45,8 +42,65 @@ def fetch_treasury_rates_fred(date_str: str, api_key: str) -> NSSYieldCurve:
         except Exception: continue
 
     curve_fit, _ = calibrate_nss_ols(np.array(maturities), np.array(yields))
-    nss_curve = NSSYieldCurve(curve_fit)
-    return nss_curve
+    return NSSYieldCurve(curve_fit)
+
+# ---------------------------------------------------------
+#  VECTORIZED ALBRECHER (2007) STABLE PRICER
+# ---------------------------------------------------------
+class HestonAnalyticalPricer:
+    @staticmethod
+    def price_european_call_vectorized(S0, K, T, r, kappa, theta, xi, rho, v0):
+        # 1. Integration Settings
+        N_grid = 256
+        u_max = 100.0
+        du = u_max / N_grid
+        u = np.linspace(1e-8, u_max, N_grid)[:, np.newaxis] # (N_grid, 1)
+
+        # q is usually 0 for SPX Index options unless specified
+        q = 0.0 
+
+        def heston_char_func(phi):
+            # rho * xi * u * 1j - kappa
+            # Albrecher (2007) Form
+            d = np.sqrt((rho * xi * phi * 1j - kappa)**2 + xi**2 * (phi * 1j + phi**2))
+            
+            # g auxiliary
+            g = (kappa - rho * xi * phi * 1j - d) / (kappa - rho * xi * phi * 1j + d)
+            
+            # Complex Exponents (C * v0 + D)
+            # C exponent for v0
+            C = (1/xi**2) * ((1 - np.exp(-d * T)) / (1 - g * np.exp(-d * T))) * (kappa - rho * xi * phi * 1j - d)
+            
+            # D exponent (Stable split logarithm)
+            val_num = 1 - g * np.exp(-d * T)
+            val_denom = 1 - g
+            D = (kappa * theta / xi**2) * ((kappa - rho * xi * phi * 1j - d) * T - 2 * (np.log(val_num) - np.log(val_denom)))
+            
+            # Drift
+            drift = 1j * phi * np.log(S0 * np.exp((r - q) * T))
+            
+            return np.exp(C * v0 + D + drift)
+
+        # Integrands (Replicating your P1/P2 logic)
+        # Integrand P1: Re[ exp(-i*u*ln(K)) * phi(u-i) / (i*u*S*e^(r-q)T) ]
+        phi_p1 = heston_char_func(u - 1j)
+        num_p1 = np.exp(-1j * u * np.log(K)) * phi_p1
+        den_p1 = 1j * u * S0 * np.exp((r - q) * T)
+        int_p1 = np.real(num_p1 / den_p1)
+
+        # Integrand P2: Re[ exp(-i*u*ln(K)) * phi(u) / (i*u) ]
+        phi_p2 = heston_char_func(u)
+        num_p2 = np.exp(-1j * u * np.log(K)) * phi_p2
+        den_p2 = 1j * u
+        int_p2 = np.real(num_p2 / den_p2)
+
+        # Integration
+        P1 = 0.5 + (1/np.pi) * np.sum(int_p1 * du, axis=0)
+        P2 = 0.5 + (1/np.pi) * np.sum(int_p2 * du, axis=0)
+
+        # Price assembly
+        price = S0 * np.exp(-q * T) * P1 - K * np.exp(-r * T) * P2
+        return np.maximum(price, 0.0)
 
 # --- HESTON CALIBRATOR ---
 class HestonCalibrator:
@@ -59,53 +113,29 @@ class HestonCalibrator:
         market_prices = np.array([o.market_price for o in options])
         r_vec = np.array([self.r_curve.get_rate(t) for t in maturities])
         
-        # --- EXACT NOTEBOOK BOUNDS ---
-        bounds = [(1e-3, 0.1), (1e-3, 5.0), (1e-3, 0.1), (1e-2, 1.0), (-1.0, 0.0), (-1.0, 1.0)]
-        
-        # --- EXACT NOTEBOOK STARTING POINT ---
-        x0 = [0.1, 3.0, 0.05, 0.3, -0.8, 0.03] 
+        # 5-Parameter Bounds (v0, kappa, theta, xi, rho)
+        bounds = [(1e-3, 0.1), (1e-3, 5.0), (1e-3, 0.1), (1e-2, 1.0), (-1.0, 0.0)]
+        x0 = [0.04, 2.5, 0.04, 0.5, -0.7]
 
         def objective(p):
-            v0, k, th, sig, rho, lam = p
+            v0, k, th, xi, rho = p
             try:
-                with warnings.catch_warnings():
-                    warnings.filterwarnings('ignore')
-                    model_p = _heston_price_nb(self.S0, strikes, maturities, r_vec, v0, k, th, sig, rho, lam)
-                    return np.mean((model_p - market_prices)**2)
-            except: return 1e9
+                model_p = HestonAnalyticalPricer.price_european_call_vectorized(
+                    self.S0, strikes, maturities, r_vec, k, th, xi, rho, v0
+                )
+                return np.mean((model_p - market_prices)**2)
+            except: 
+                return 1e9
 
         def callback(xk):
-             print(f"   [Step] v0={xk[0]:.4f}, k={xk[1]:.2f}, th={xk[2]:.4f}, sig={xk[3]:.4f}, rho={xk[4]:.2f}, lam={xk[5]:.4f}")
+             print(f"==> [Step] RMSE: {np.sqrt(objective(xk)):.4f} | v0={xk[0]:.4f} k={xk[1]:.2f} th={xk[2]:.4f} xi={xk[3]:.4f} rho={xk[4]:.2f}")
 
-        print(f"\nCalibrating Heston on {len(options)} options...")
-        # eps and ftol added to ensure the solver actually moves from x0
-        res = minimize(objective, x0, method='SLSQP', bounds=bounds, 
-                       callback=callback, tol=1e-4, options={'eps': 1e-3})
+        print(f"\nCalibrating Heston (5-Param Albrecher) on {len(options)} options...")
+        res = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, 
+                       options={'eps': 1e-2, 'ftol': 1e-8})
         
         return {"v0": res.x[0], "kappa": res.x[1], "theta": res.x[2], 
-                "sigma": res.x[3], "rho": res.x[4], "lambd": res.x[5], "rmse": np.sqrt(res.fun)}
-
-# --- PRICING HELPERS ---
-def _heston_price_nb(S0, K, tau, r, v0, kappa, theta, sigma, rho, lambd):
-    N, umax = 5000, 100 
-    dphi = umax / N
-    phi = (dphi * (2 * np.arange(1, N) + 1) / 2)[:, np.newaxis] 
-    args = (S0, tau, r, v0, kappa, theta, sigma, rho, lambd)
-    term1 = 0.5 * (S0 - K * np.exp(-r * tau))
-    num = np.exp(r * tau) * _char_func_nb(phi - 1j, *args) - K * _char_func_nb(phi, *args)
-    den = 1j * phi * (K**(1j * phi))
-    integral = np.real(np.sum(dphi * num / den, axis=0))
-    return term1 + integral / np.pi
-
-def _char_func_nb(phi, S0, tau, r, v0, kappa, theta, sigma, rho, lambd):
-    a, b = kappa * theta, kappa + lambd
-    rspi = rho * sigma * phi * 1j
-    d = np.sqrt((rspi - b)**2 + (phi * 1j + phi**2) * sigma**2)
-    g = (b - rspi + d) / (b - rspi - d)
-    exp1 = np.exp(r * phi * 1j * tau)
-    term2 = S0**(phi * 1j) * ((1 - g * np.exp(d * tau)) / (1 - g))**(-2 * a / sigma**2)
-    exp2 = np.exp(a * tau * (b - rspi + d) / sigma**2 + v0 * (b - rspi + d) * ((1 - np.exp(d * tau)) / (1 - g * np.exp(d * tau))) / sigma**2)
-    return exp1 * term2 * exp2
+                "xi": res.x[3], "rho": res.x[4], "rmse": np.sqrt(res.fun)}
 
 # --- LOADER ---
 def load_spx_replication(file_path, target_date):
@@ -125,6 +155,7 @@ def load_spx_replication(file_path, target_date):
     return [MarketOption(row['STRIKE'], row['T'], (row['C_BID'] + row['C_ASK']) / 2) for _, row in day_data.iterrows()], S0
 
 if __name__ == "__main__":
+    FRED_API_KEY = os.getenv("FRED_API_KEY") 
     TARGET_DATE = "2022-03-25"
     r_curve = fetch_treasury_rates_fred(TARGET_DATE, FRED_API_KEY)
     options, S0 = load_spx_replication("src/spx_eod_202203.txt", TARGET_DATE)
