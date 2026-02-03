@@ -1,11 +1,16 @@
+import os
+import json
+import time
 import numpy as np
 import pandas as pd
 import requests
 import yfinance as yf
 from datetime import datetime, timedelta
 from dataclasses import dataclass
-from typing import List
-from nelson_siegel_svensson.calibrate import calibrate_nss_ols
+from typing import List, Dict
+from scipy.interpolate import PchipInterpolator
+from sklearn.linear_model import LinearRegression
+from concurrent.futures import ThreadPoolExecutor
 
 @dataclass
 class MarketOption:
@@ -16,166 +21,174 @@ class MarketOption:
     bid: float = 0.0
     ask: float = 0.0
 
-# --- PART 1: RATE ENGINE (NSS/FRED) ---
+# --- PART 1: RATE ENGINE ---
 class NSSYieldCurve:
     def __init__(self, curve_fit):
         self.curve = curve_fit
     def get_rate(self, T: float) -> float:
         return float(self.curve(max(T, 1e-4)))
+    def to_dict(self):
+        return {f"{round(t,3)}Y": self.get_rate(t) for t in [0.08, 0.25, 0.5, 1.0]}
 
 def fetch_treasury_rates_fred(date_str: str, api_key: str) -> NSSYieldCurve:
-    """Fetches official yields. Looks back up to 5 days to handle weekends/holidays."""
-    series_map = {
-        1/12: "DGS1MO", 3/12: "DGS3MO", 6/12: "DGS6MO", 
-        1.0: "DGS1", 2.0: "DGS2", 5.0: "DGS5", 10.0: "DGS10", 30.0: "DGS30"
-    }
-    
-    def fetch_for_date(d_str):
+    series_map = {1/12: "DGS1MO", 3/12: "DGS3MO", 6/12: "DGS6MO", 1.0: "DGS1", 2.0: "DGS2"}
+    target_dt = datetime.strptime(date_str, "%Y-%m-%d")
+    for i in range(6):
+        d_str = (target_dt - timedelta(days=i)).strftime("%Y-%m-%d")
         mats, yields = [], []
         for tenor, s_id in series_map.items():
-            url = f"https://api.stlouisfed.org/fred/series/observations?series_id={s_id}&api_key={api_key}&file_type=json&observation_start={d_str}&observation_end={d_str}"
             try:
-                res = requests.get(url, timeout=5).json()
+                url = f"https://api.stlouisfed.org/fred/series/observations?series_id={s_id}&api_key={api_key}&file_type=json&observation_start={d_str}&observation_end={d_str}"
+                res = requests.get(url, timeout=3).json()
                 val = res['observations'][0]['value']
                 if val != '.':
                     mats.append(tenor)
                     yields.append(float(val) / 100.0)
             except: continue
-        return mats, yields
-
-    target_dt = datetime.strptime(date_str, "%Y-%m-%d")
-    for i in range(6):
-        lookup_date = (target_dt - timedelta(days=i)).strftime("%Y-%m-%d")
-        maturities, yields = fetch_for_date(lookup_date)
-        if maturities:
-            curve_fit, _ = calibrate_nss_ols(np.array(maturities), np.array(yields))
+        if len(mats) >= 3:
+            from nelson_siegel_svensson.calibrate import calibrate_nss_ols
+            curve_fit, _ = calibrate_nss_ols(np.array(mats), np.array(yields))
             return NSSYieldCurve(curve_fit)
-    
-    raise ValueError("Could not fetch FRED rates for the last 5 days.")
+    raise ValueError("Could not fetch FRED rates.")
 
-# --- PART 2: SMART DIVIDEND CURVE ---
+# --- PART 2: ROBUST DIVIDEND ENGINE ---
 class ImpliedDividendCurve:
-    """Extracts implied dividend yield term structure using Put-Call Parity."""
-    def __init__(self, df: pd.DataFrame, S0: float, r_curve):
+    """
+    Industry-grade dividend engine. Uses Regression PCP on liquid pillars.
+    Ignores short-end noise (<1M) to prevent yield explosions.
+    """
+    def __init__(self, df: pd.DataFrame, S0_anchor: float, r_curve):
         self.yields = {}
-        # Group by maturity and find ATM points
-        for T in sorted(df['T'].unique()):
-            if T < 0.005: continue
+        
+        # Filter pillars: Only use 1M to 1.3Y (Stability over Noise)
+        # We ignore T < 0.07 to avoid the 1/T noise magnification
+        unique_Ts = sorted([t for t in df['T'].unique() if 0.07 <= t <= 1.3])
+        
+        for T in unique_Ts:
             subset = df[df['T'] == T]
-            r = r_curve.get_rate(T)
+            # Use ATM options (+/- 8% moneyness) for regression stability
+            mask = (subset['STRIKE'] > S0_anchor * 0.92) & (subset['STRIKE'] < S0_anchor * 1.08)
+            data = subset[mask].dropna()
             
-            # Find row closest to ATM Forward (F = S*exp(rT))
-            F_approx = S0 * np.exp(r * T)
-            valid = subset.dropna(subset=['C_MID', 'P_MID'])
-            if valid.empty: continue
+            if len(data) < 5: continue
             
-            row = valid.loc[(valid['STRIKE'] - F_approx).abs().idxmin()]
-            # Solve q: S*exp(-qT) = C - P + K*exp(-rT)
-            rhs = row['C_MID'] - row['P_MID'] + row['STRIKE'] * np.exp(-r * T)
+            # Regression PCP: (C - P) = exp(-rT) * F - exp(-rT) * K
+            # Model: y = alpha + beta * K
+            X = data['STRIKE'].values.reshape(-1, 1)
+            y = (data['C_MID'] - data['P_MID']).values
             
-            if rhs > 0:
-                self.yields[T] = -np.log(rhs / S0) / T
+            reg = LinearRegression().fit(X, y)
+            alpha, beta = reg.intercept_, reg.coef_[0]
+            
+            # F = -alpha / beta (Market implied forward)
+            if beta < 0:
+                F_implied = -alpha / beta
+                r = r_curve.get_rate(T)
+                # Solve for q: F = S0 * exp((r-q)T) -> q = r - ln(F/S0)/T
+                q = r - np.log(F_implied / S0_anchor) / T
+                
+                # Clamp to realistic SPX range (0.2% to 2.5%)
+                self.yields[T] = max(0.002, min(q, 0.025))
+
+        # Setup Monotonic Cubic Spline (Pchip)
+        mats = np.array(sorted(self.yields.keys()))
+        vals = np.array([self.yields[m] for m in mats])
+        
+        if len(mats) > 1:
+            self.interpolator = PchipInterpolator(mats, vals, extrapolate=False)
+            self.min_T, self.max_T = mats[0], mats[-1]
+            self.val_min, self.val_max = vals[0], vals[-1]
+        else:
+            default = vals[0] if len(vals) > 0 else 0.013 # SPX default
+            self.interpolator = lambda t: default
+            self.min_T, self.max_T, self.val_min, self.val_max = 0, 99, default, default
 
     def get_rate(self, T: float) -> float:
-        mats = sorted(self.yields.keys())
-        if len(mats) > 1:
-            # Linear interpolation/extrapolation
-            return float(np.interp(T, mats, [self.yields[m] for m in mats]))
-        elif len(mats) == 1:
-            return float(self.yields[mats[0]])
-        return 0.015
+        # Flat extrapolation outside the pillar range for stability
+        if T < self.min_T: return float(self.val_min)
+        if T > self.max_T: return float(self.val_max)
+        return float(self.interpolator(T))
+    
+    def to_dict(self):
+        return {str(round(k,3)): v for k,v in self.yields.items()}
 
-# --- PART 3: DATA FETCHING ---
+# --- PART 3: OPTIMIZED DATA FETCHING ---
 def fetch_raw_data(ticker_symbol: str) -> pd.DataFrame:
-    """Fetches broad options data for curve construction. Scans deep for long tenors."""
+    """Parallel fetch of liquid monthly/quarterly monthly pillars."""
     ticker = yf.Ticker(ticker_symbol)
-    today, all_rows = datetime.now(), []
+    today = datetime.now()
+    # Focus on standard monthly tenors for a clean curve
+    targets = [0.08, 0.17, 0.25, 0.5, 0.75, 1.0, 1.25] 
     
-    # SCAN DEPTH: Increased to 120 to catch 1Y and 2Y monthly/quarterly contracts
-    exp_list = ticker.options
-    limit = min(len(exp_list), 120)
-    
-    print(f"Scanning {limit} expirations for dividend extraction...")
-    for exp_str in exp_list[:limit]: 
+    selected_exps = set()
+    all_exps = ticker.options
+    for t in targets:
+        best = min(all_exps, key=lambda x: abs(((datetime.strptime(x, "%Y-%m-%d") - today).days / 365.25) - t))
+        selected_exps.add(best)
+
+    def fetch_one(exp_str):
         try:
             T = (datetime.strptime(exp_str, "%Y-%m-%d") - today).days / 365.25
-            if T < 0.005: continue
             chain = ticker.option_chain(exp_str)
-            for opt_type, data in [('CALL', chain.calls), ('PUT', chain.puts)]:
-                for _, row in data.iterrows():
-                    all_rows.append({
-                        'T': T, 
-                        'STRIKE': round(float(row['strike']), 2),
-                        'type': opt_type, 
-                        'bid': row['bid'], 
-                        'ask': row['ask']
-                    })
-        except: continue
+            df_c = chain.calls[['strike', 'bid', 'ask']].rename(columns={'strike':'STRIKE', 'bid':'bC', 'ask':'aC'})
+            df_p = chain.puts[['strike', 'bid', 'ask']].rename(columns={'strike':'STRIKE', 'bid':'bP', 'ask':'aP'})
+            full = df_c.merge(df_p, on='STRIKE')
+            full['C_MID'], full['P_MID'], full['T'] = (full['bC']+full['aC'])/2, (full['bP']+full['aP'])/2, T
+            return full
+        except: return None
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(fetch_one, selected_exps))
+    return pd.concat([r for r in results if r is not None], ignore_index=True)
+
+def get_market_implied_spot(ticker_symbol: str, raw_df: pd.DataFrame, r_curve) -> float:
+    """
+    Derives a synchronized S0 anchor.
+    This prevents run-to-run drift by aligning spot with the option prices.
+    """
+    # Use the 1-month pillar as the master anchor
+    unique_Ts = sorted(raw_df['T'].unique())
+    anchor_T = min(unique_Ts, key=lambda x: abs(x - 0.08))
     
-    df = pd.DataFrame(all_rows)
-    df_c = df[df['type']=='CALL'].drop(columns='type').rename(columns={'bid':'C_BID','ask':'C_ASK'}).set_index(['T','STRIKE'])
-    df_p = df[df['type']=='PUT'].drop(columns='type').rename(columns={'bid':'P_BID','ask':'P_ASK'}).set_index(['T','STRIKE'])
+    subset = raw_df[raw_df['T'] == anchor_T].copy()
+    r = r_curve.get_rate(anchor_T)
     
-    full = df_c.join(df_p, how='inner').reset_index()
-    full['C_MID'], full['P_MID'] = (full['C_BID']+full['C_ASK'])/2, (full['P_BID']+full['P_ASK'])/2
-    return full
+    # Simple Regression to find the Forward
+    X = subset['STRIKE'].values.reshape(-1, 1)
+    y = (subset['C_MID'] - subset['P_MID']).values
+    reg = LinearRegression().fit(X, y)
+    F = -reg.intercept_ / reg.coef_[0]
+    
+    # We anchor S0 by assuming a baseline SPX yield of ~1.3% at 1-month
+    S0_consistent = F * np.exp(-(r - 0.013) * anchor_T)
+    return float(S0_consistent)
 
 def fetch_options(ticker_symbol: str, S0: float, target_size: int = 300) -> List[MarketOption]:
-    """Hybrid OTM Filter: Fetches liquid OTM options within a stable moneyness window."""
+    """Fetches the broad calibration dataset."""
     ticker = yf.Ticker(ticker_symbol)
-    today, candidates = datetime.now(), []
-    exp_list = ticker.options
-    limit = min(len(exp_list), 100)
-
-    # Define Moneyness Bounds (e.g., 0.85 to 1.15)
-    # This prevents the model from hitting rho boundaries trying to fit extreme wings.
-    lower_k = S0 * 0.85
-    upper_k = S0 * 1.15
-
-    for exp_str in exp_list[:limit]:
+    today = datetime.now()
+    valid_exps = [e for e in ticker.options if 0.04 <= (datetime.strptime(e, "%Y-%m-%d") - today).days/365.25 <= 1.3]
+    
+    def process(exp_str):
         try:
             T = (datetime.strptime(exp_str, "%Y-%m-%d") - today).days / 365.25
-            if not (0.04 <= T <= 2.2): continue
             chain = ticker.option_chain(exp_str)
-            
-            for opt_type, data, filter_func in [
-                ('PUT', chain.puts, lambda k: (k < S0) & (k >= lower_k)), 
-                ('CALL', chain.calls, lambda k: (k > S0) & (k <= upper_k))
-            ]:
-                # Apply the combined OTM + Moneyness filter
-                otm = data[filter_func(data['strike'])].copy()
-                
-                for _, row in otm.iterrows():
-                    mid = (row['bid'] + row['ask']) / 2
-                    # Liquidity check (bid > 0.05% of spot)
-                    if row['bid'] > S0 * 0.0005:
-                        candidates.append(MarketOption(
-                            row['strike'], T, mid, opt_type, row['bid'], row['ask']
-                        ))
-        except: continue
-    
-    # Deterministic sampling
-    if len(candidates) > target_size:
-        indices = np.linspace(0, len(candidates)-1, target_size, dtype=int)
-        candidates = [candidates[i] for i in indices]
-    return candidates
+            local = []
+            # Standard OTM filtering for Heston calibration
+            for opt_type, data, f in [('PUT', chain.puts, lambda k: k < S0), ('CALL', chain.calls, lambda k: k > S0)]:
+                subset = data[f(data['strike']) & (data['strike'] > S0*0.75) & (data['strike'] < S0*1.25)]
+                for _, row in subset.iterrows():
+                    mid, bid, ask = (row['bid']+row['ask'])/2, row['bid'], row['ask']
+                    if mid > 0.1 and bid > 0 and (ask-bid)/max(mid, 0.01) < 0.25:
+                        local.append(MarketOption(row['strike'], T, mid, opt_type, bid, ask))
+            return local
+        except: return []
 
-def get_market_implied_spot(ticker_symbol: str, r_curve) -> float:
-    ticker = yf.Ticker(ticker_symbol)
-    try: S_anchor = ticker.fast_info['last_price']
-    except: return 0.0
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        results = list(executor.map(process, valid_exps))
     
-    # Use near-term options to refine Spot via Put-Call Parity
-    for exp_str in ticker.options[:3]:
-        try:
-            T = (datetime.strptime(exp_str, "%Y-%m-%d") - datetime.now()).days / 365.25
-            chain = ticker.option_chain(exp_str)
-            merged = pd.merge(chain.calls, chain.puts, on='strike')
-            merged['C'], merged['P'] = (merged.bid_x + merged.ask_x)/2, (merged.bid_y + merged.ask_y)/2
-            atm = merged[(merged.strike > S_anchor*0.98) & (merged.strike < S_anchor*1.02)]
-            if atm.empty: continue
-            r = r_curve.get_rate(T)
-            # S = C - P + K*exp(-rT)
-            return (atm.C - atm.P + atm.strike * np.exp(-r*T)).median()
-        except: continue
-    return S_anchor
+    all_c = [item for sublist in results for item in sublist]
+    if len(all_c) > target_size:
+        indices = np.linspace(0, len(all_c)-1, target_size, dtype=int)
+        return [all_c[i] for i in indices]
+    return all_c
