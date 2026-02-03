@@ -64,7 +64,7 @@ class ImpliedDividendCurve:
         # STABILITY FILTER: We only use tenors >= 1 Month (0.07) for the curve.
         # Short-dated noise (<1M) will be handled by flat extrapolation in get_rate().
         # This effectively "aligns" the 1-week and 2-week with the 1-month anchor.
-        unique_Ts = sorted([t for t in df['T'].unique() if t >= 0.07])
+        unique_Ts = sorted([t for t in df['T'].unique() if t >= 0.04]) #0.07
         
         for T in unique_Ts:
             subset = df[df['T'] == T]

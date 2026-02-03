@@ -42,7 +42,7 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, res_mc, options):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = f"results/calibration_{ticker}_{timestamp}"
     
-    tenors = [(0.0192, "1 Week"), (0.0385, "2 Weeks"), (0.0833, "1 Month"), 
+    tenors = [(0.0385, "2 Weeks"), (0.0833, "1 Month"), 
               (0.1667, "2 Months"), (0.25, "3 Months"), (0.3333, "4 Months"), 
               (0.4167, "5 Months"), (0.5, "6 Months"), (0.5833, "7 Months"), 
               (0.6667, "8 Months"), (0.75, "9 Months"), (0.8333, "10 Months"), 
@@ -130,7 +130,7 @@ def print_curves(r_curve, q_curve):
     print("\n" + "="*60)
     print(f"{'Tenor':<10} | {'Risk-Free (r)':<15} | {'Div Yield (q)':<15}")
     print("-" * 60)
-    tenors = [(0.0192, "1 Week"), (0.0385, "2 Weeks"), (0.0833, "1 Month"), 
+    tenors = [(0.0385, "2 Weeks"), (0.0833, "1 Month"), 
               (0.1667, "2 Months"), (0.25, "3 Months"), (0.3333, "4 Months"), 
               (0.4167, "5 Months"), (0.5, "6 Months"), (0.5833, "7 Months"), 
               (0.6667, "8 Months"), (0.75, "9 Months"), (0.8333, "10 Months"), 
