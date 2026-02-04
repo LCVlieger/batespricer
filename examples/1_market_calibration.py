@@ -82,6 +82,8 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, options):
         rows.append({
             "T": round(opt.maturity, 3), 
             "K": opt.strike, 
+            "Type": opt.option_type,
+            "Spread": spread,
             "Market": round(opt.market_price, 2),
             "Model": round(model_p, 2), 
             "Err": round(err_ana, 2),
