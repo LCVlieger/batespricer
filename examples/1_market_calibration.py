@@ -172,7 +172,7 @@ def main():
     print(f"k: {res_a['kappa']:.4f} | th: {res_a['theta']:.4f} | xi: {res_a['xi']:.4f} | rho: {res_a['rho']:.4f} | v0: {res_a['v0']:.4f}\n")
     print(f"{'='*20} 2. MONTE CARLO CALIBRATION {'='*20}")
     t1 = time.time()
-    calib_mc = HestonCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=5000, n_steps=2000)
+    calib_mc = HestonCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=7500, n_steps=3000)
     x0 = [res_a[k] for k in ['kappa','theta','xi','rho','v0']]
     res_mc = calib_mc.calibrate(options_processed)
     print(f"MONTE CARLO RESULTS (Time: {time.time()-t1:.2f}s)")
