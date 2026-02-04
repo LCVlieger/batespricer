@@ -135,7 +135,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     # --- 1. CONFIGURATION ---
     LOWER_M, UPPER_M = 0.7, 1.3 
     LOWER_T, UPPER_T = 0.04, 1.5 
-    GRID_DENSITY = 60 # 100 is smoother but slower
+    GRID_DENSITY = 100 # 100 is smoother but slower
 
     M_range = np.linspace(LOWER_M, UPPER_M, GRID_DENSITY)
     T_range = np.linspace(LOWER_T, UPPER_T, GRID_DENSITY)
@@ -174,7 +174,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     mask = np.isnan(Z)
     if np.any(mask):
         Z = pd.DataFrame(Z).interpolate(method='linear', axis=1).ffill(axis=1).bfill(axis=1).values
-    Z_smooth = gaussian_filter(Z, sigma=0.5)
+    Z_smooth = gaussian_filter(Z, sigma=0)
 
     # --- 3. PLOTTING ---
     with plt.style.context('dark_background'):
@@ -204,7 +204,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                     
                     # 2. EXACT MODEL IV (Bates)
                     prices_mod = BatesAnalyticalPricer.price_vectorized(
-                        S0, np.array([opt.strike]), np.array([t_mkt]), np.array([r_T_mkt]), np.array([q_T_mkt]), opt.option_type,
+                        S0, np.array([opt.strike]), np.array([t_mkt]), np.array([r_T_mkt]), np.array([q_T_mkt]), np.array([opt.option_type]),
                         kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
                     )
                     price_mod = float(prices_mod[0])

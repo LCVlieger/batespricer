@@ -2,7 +2,6 @@ from scipy.stats import norm
 import numpy as np
 from scipy.optimize import brentq
 
-
 def implied_volatility(price, S, K, T, r, q, option_type="CALL"): 
     if price <= 0: return 0.0
     intrinsic = max(K * np.exp(-r*T) - S * np.exp(-q*T), 0) if option_type == "PUT" else max(S * np.exp(-q*T) - K * np.exp(-r*T), 0)
@@ -17,18 +16,22 @@ def implied_volatility(price, S, K, T, r, q, option_type="CALL"):
 
 class BatesAnalyticalPricer:
     """
-    High-performance analytical pricer for Bates (1996).
-    Hardened for SPX: Quadratic grid, u_max=10000, and Trapezoidal integration.
+    Analytical pricer for the Bates model with Merton jumps.
+    High-resolution engine using a quadratic grid and Trapezoidal integration 
+    to handle SPX spot levels and short-term stability.
     """
 
     @staticmethod
     def price_vectorized(S0, K, T, r, q, types, kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j):
-        # 1. ULTIMATE RESOLUTION: 8000 points up to u=10000
+        # 1. UPGRADED RESOLUTION: 8000 points up to u=10000
         N_grid, u_limit = 8000, 10000.0 
+        
+        # Quadratic grid to pack points near the u=0 singularity
         u_linear = np.linspace(0, 1, N_grid + 1)
         u = (u_linear**2 * u_limit)[:, np.newaxis]
         u[0] = 1e-12 
         
+        # Grid differentials for non-linear integration
         du = np.diff(u, axis=0) 
         
         K, T, r, q = np.atleast_1d(K), np.atleast_1d(T), np.atleast_1d(r), np.atleast_1d(q)
@@ -41,9 +44,11 @@ class BatesAnalyticalPricer:
             g = (kappa - rho * xi_s * phi * 1j - d) / (kappa - rho * xi_s * phi * 1j + d)
             e_neg_dT = np.exp(-d * T_mat)
             C = (1/xi_s**2) * ((1 - e_neg_dT) / (1 - g * e_neg_dT)) * (kappa - rho * xi_s * phi * 1j - d)
+            # Albrecher (2007) Stable Formulation
             D = (kappa * theta / xi_s**2) * ((kappa - rho * xi_s * phi * 1j - d) * T_mat - 
                 2 * np.log((1 - e_neg_dT * g) / (1 - g + 1e-15)))
             
+            # Merton Jump Component
             k_bar = np.exp(mu_j + 0.5 * sigma_j**2) - 1
             e_i_phi_J = np.exp(1j * phi * mu_j - 0.5 * sigma_j**2 * phi**2)
             jump_part = lamb * T_mat * (e_i_phi_J - 1 - 1j * phi * k_bar)
@@ -54,18 +59,21 @@ class BatesAnalyticalPricer:
         int_p1 = np.real((np.exp(-1j * u * np.log(K_mat)) * cf_p1) / (1j * u * F_mat))
         int_p2 = np.real((np.exp(-1j * u * np.log(K_mat)) * cf_p2) / (1j * u))
 
-        # --- DIAGNOSTICS ---
+        # --- CALIBRATION DIAGNOSTICS ---
+        
+        # A. TRUNCATION (Tail check)
         tail_magnitude = np.max(np.abs(int_p2[-1, :]))
         if tail_magnitude > 1e-4:
             bad_idx = np.argmax(np.abs(int_p2[-1, :]))
             print(f"!!! TRUNCATION ALERT: Tail magnitude {tail_magnitude:.6f} at K={K[bad_idx]:.0f} (T={T[bad_idx]:.3f}).")
 
+        # B. SINGULARITY (u=0 mass check)
         area_total = np.sum(np.abs(int_p2[:-1, :]) * du, axis=0)
         area_start = np.sum(np.abs(int_p2[:20, :]) * du[:20, :], axis=0)
         if np.any(area_start / (area_total + 1e-9) > 0.45):
              print(f"!!! SINGULARITY ALERT: Heavy mass at u=0 for T={T[0]:.3f}. Precision may be compromised.")
 
-        # 2. INTEGRATION (Trapezoidal Rule)
+        # 2. INTEGRATION (Trapezoidal Rule for Quadratic Grid)
         is_otm_call = (K_mat > F_mat)
         P1_sum = np.sum(0.5 * (int_p1[:-1, :] + int_p1[1:, :]) * du, axis=0)
         P2_sum = np.sum(0.5 * (int_p2[:-1, :] + int_p2[1:, :]) * du, axis=0)
@@ -73,13 +81,14 @@ class BatesAnalyticalPricer:
         P1 = np.where(is_otm_call, 0.5 + (1/np.pi) * P1_sum, 0.5 - (1/np.pi) * P1_sum)
         P2 = np.where(is_otm_call, 0.5 + (1/np.pi) * P2_sum, 0.5 - (1/np.pi) * P2_sum)
         
+        # OTM-Direct Calculation
         price_otm = np.where(is_otm_call,
                              S0 * np.exp(-q_mat * T_mat) * P1 - K_mat * np.exp(-r_mat * T_mat) * P2,
                              K_mat * np.exp(-r_mat * T_mat) * P2 - S0 * np.exp(-q_mat * T_mat) * P1)
         
         price_otm = np.maximum(price_otm.flatten(), 0.0)
 
-        # 3. ALIASING CHECK
+        # C. ALIASING (Monotonicity Check)
         if len(np.unique(T)) == 1:
             is_put_req = (np.array([t.upper() for t in types]) == "PUT")
             if np.sum(is_put_req) > 1:
@@ -87,7 +96,7 @@ class BatesAnalyticalPricer:
                 if np.any(np.diff(put_prices) < -0.05):
                     print(f"!!! ALIASING ALERT: Non-monotonic Puts at T={T[0]:.3f}. Numerical ringing detected.")
 
-        # 4. TYPE CONVERSION
+        # 3. REQUESTED TYPE CONVERSION
         res = price_otm
         is_put_req = (np.array([t.upper() for t in types]) == "PUT")
         is_itm_req = (is_put_req != (~is_otm_call.flatten()))

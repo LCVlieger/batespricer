@@ -131,6 +131,26 @@ def fetch_raw_data(ticker_symbol: str) -> pd.DataFrame:
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(fetch_one, sorted(list(selected_exps))))
     return pd.concat([r for r in results if r is not None], ignore_index=True)
+def calculate_spx_time_to_maturity(expiry_date, is_am_settled=True):
+    """
+    Standardizes T for SPX AM vs PM settlement.
+    """
+    now = datetime.now()
+    
+    # 1. Define the exact settlement moment
+    if is_am_settled:
+        # Friday morning at 9:30 AM Eastern
+        expiry_settlement = datetime.combine(expiry_date, time(9, 30))
+    else:
+        # Friday afternoon at 4:00 PM Eastern (Weeklies)
+        expiry_settlement = datetime.combine(expiry_date, time(16, 0))
+    
+    # 2. Calculate T in years (Actual/365 or Actual/360 depending on your curve)
+    delta = expiry_settlement - now
+    t_seconds = delta.total_seconds()
+    
+    # If we are past settlement, T should be 0 (or handled as expired)
+    return max(t_seconds / (365 * 24 * 3600), 1e-6)
 
 def get_market_implied_spot(ticker_symbol: str, raw_df: pd.DataFrame, r_curve) -> float:
     """
