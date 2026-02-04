@@ -60,6 +60,7 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, options):
     strikes = np.array([o.strike for o in options])
     mats = np.array([o.maturity for o in options])
     types = np.array([o.option_type for o in options])
+    spreads = np.array([abs(opt.ask - opt.bid) for o in options])
     mkt_prices = np.array([o.market_price for o in options])
     r_vec = np.array([r_curve.get_rate(t) for t in mats])
     q_vec = np.array([q_curve.get_rate(t) for t in mats])
@@ -83,8 +84,8 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, options):
             "T": round(opt.maturity, 3), 
             "K": opt.strike, 
             "Type": opt.option_type,
-            "Spread": spread,
             "Market": round(opt.market_price, 2),
+            "Spread": round(abs(opt.ask - opt.bid),4),
             "Model": round(model_p, 2), 
             "Err": round(err_ana, 2),
             "IV_Mkt": round(iv_mkt, 4),
