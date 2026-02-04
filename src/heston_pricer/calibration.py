@@ -30,7 +30,7 @@ class BatesCalibrator:
     def _calculate_robust_weights(self, options, sigma_cap=2.0):
         """Calculates 1/spread weights capped at mean + n*sigma to handle outliers."""
         spreads = np.array([max(abs(o.ask - o.bid), 0.01) for o in options])
-        raw_weights = 1.0 #/ spreads
+        raw_weights = 1.0 / np.sqrt(spreads) 
         
         mu = np.mean(raw_weights)
         std = np.std(raw_weights)
@@ -111,7 +111,7 @@ class BatesCalibrator:
                 raw_diff = (model_p - market_prices)
                 
                 # We combine spread weights (trustworthiness) with Vega weights (importance)
-                weighted_diff = (raw_diff / (vegas + 1e-4)) * spread_weights
+                weighted_diff = (raw_diff * spread_weights) # raw_diff / (vegas + 1e-4)) * spread_weights
                 
                 return np.sqrt(np.mean(weighted_diff**2)) 
             except: 
