@@ -71,7 +71,7 @@ class BatesCalibrator:
             
             # FLOOR: Prevent division by zero for deep OTM options.
             # We floor the vega at 1% of the ATM vega to avoid exploding weights.
-            robust_vega = max(opt_vega, 0.01 * atm_vega_map[T])
+            robust_vega = max(opt_vega, 0.05 * atm_vega_map[T])
             vegas.append(robust_vega)
         
         vegas = np.array(vegas)

@@ -273,7 +273,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         
         ax.set_xlabel('Moneyness ($K/S_0$)', color='white', labelpad=10)
         ax.set_ylabel('Maturity ($T$ Years)', color='white', labelpad=10)
-        ax.set_zlabel(r'Implied Volatility (%)', color='white', labelpad=10)
+        ax.set_zlabel(r'Implied Volatility', color='white', labelpad=10)
 
         if market_options and valid_needles > 0:
             ax.legend(loc='upper left', bbox_to_anchor=(0.157, 0.797), frameon=False, labelcolor="#D7D7D7", fontsize=10)
