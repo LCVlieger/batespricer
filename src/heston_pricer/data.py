@@ -51,37 +51,20 @@ def fetch_treasury_rates_fred(date_str: str, api_key: str) -> NSSYieldCurve:
             curve_fit, _ = calibrate_nss_ols(np.array(mats), np.array(yields))
             return NSSYieldCurve(curve_fit)
     raise ValueError("Could not fetch FRED rates.")
+
+
 class ImpliedDividendCurve:
     """
-    Hybrid dividend engine. Uses hardcoded values for front-end pillars 
-    (1W, 2W) to eliminate calibration needles, falling back to 
-    ATM-synced Put-Call Parity for longer tenors.
+    Market-implied dividend engine. Synchronizes the forward price 
+    using Put-Call Parity at the ATM strike for every tenor.
     """
     def __init__(self, df: pd.DataFrame, S0_anchor: float, r_curve):
         self.yields = {}
-        
-        # --- HARDCODED PILLARS ---
-        # These values target the 'sweet spots' that eliminate 
-        # pricing needles for short-dated ITM/OTM wings.
-        # Format: {Maturity_Years: Yield_Value}
-        manual_pins = {
-            0.019: 0.013, #-0.055, #-0.055,  # 1-Week: Pinning at -5.5%
-            0.041: 0.013 # -0.03 #-0.030   # 2-Weeks: Pinning at -3.0%
-        }
-        
-        unique_Ts = sorted([t for t in df['T'].unique()]) 
+        unique_Ts = sorted(df['T'].unique()) 
         
         for T in unique_Ts:
-            # Check for a manual override (with 1-day tolerance)
-            override_val = next((v for m, v in manual_pins.items() if abs(m - T) < 0.005), None)
-            
-            if override_val is not None:
-                self.yields[T] = override_val
-                continue
-
-            # --- FALLBACK: ATM SYNC ---
             subset = df[df['T'] == T]
-            # Find the strike closest to spot
+            # Find the strike closest to spot (ATM)
             atm_idx = (subset['STRIKE'] - S0_anchor).abs().idxmin()
             atm_opt = subset.loc[atm_idx]
             
@@ -90,6 +73,7 @@ class ImpliedDividendCurve:
             C, P, K = atm_opt['C_MID'], atm_opt['P_MID'], atm_opt['STRIKE']
             
             # Back-solve for Market-Implied Forward (F)
+            # This is the price the market 'expects' for the future index level
             F_market = (C - P) * np.exp(r * T) + K
             
             # F = S0 * e^((r-q)T)  =>  q = r - ln(F/S0) / T
@@ -98,13 +82,13 @@ class ImpliedDividendCurve:
             else:
                 q_sync = 0.0
             
-            self.yields[T] = np.clip(q_sync, -0.20, 0.20)
+            # Store the synchronized yield for this tenor
+            self.yields[T] = float(np.clip(q_sync, -0.15, 0.15))
 
         # --- INTERPOLATION ---
         mats = np.array(sorted(self.yields.keys()))
         vals = np.array([self.yields[m] for m in mats])
         
-        # Linear interpolation handles the jagged front-end better than cubic/Pchip
         self.interpolator = interp1d(mats, vals, kind='linear', 
                                      bounds_error=False, 
                                      fill_value=(vals[0], vals[-1]))
@@ -118,7 +102,7 @@ class ImpliedDividendCurve:
         return float(self.interpolator(T))
 
     def to_dict(self):
-        return {str(round(k, 3)): v for k, v in self.yields.items()}
+        return {str(round(k, 4)): v for k, v in self.yields.items()}
     
 # --- PART 3: DATA FETCHING & DYNAMIC SPOT ANCHOR ---
 def fetch_raw_data(ticker_symbol: str) -> pd.DataFrame:

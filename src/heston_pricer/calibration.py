@@ -85,7 +85,6 @@ class BatesCalibrator:
             print(f"   [Step] W-Obj: {w_obj:.4f} | "
                   f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} | "
                   f"L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
-
         res = minimize(
             objective, 
             x0, 
