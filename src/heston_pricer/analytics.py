@@ -15,48 +15,36 @@ def implied_volatility(price, S, K, T, r, q, option_type="CALL"):
     try: return brentq(bs_price, 0.001, 5.0)
     except: return 0.0
 
-class HestonAnalyticalPricer:
+class BatesAnalyticalPricer:
     """
-    High-performance analytical pricer for European options using the Heston model.
-    Implements the Albrecher et al. (2007) 'Little Heston' formulation for 
-    numerical stability in the complex logarithm branch.
+    High-performance analytical pricer for European options using the Bates (1996) model.
+    Extends the Heston model with Merton Log-Normal Jumps, maintaining Albrecher et al. (2007)
+    numerical stability.
     """
     
     @staticmethod
-    def price_european_call_vectorized(S0, K, T, r, q, kappa, theta, xi, rho, v0):
+    def price_european_call_vectorized(S0, K, T, r, q, kappa, theta, xi, rho, v0, 
+                                       lamb, mu_j, sigma_j):
         """
         Calculates European Call option prices using vectorized Fourier integration.
         
         Parameters:
         -----------
-        S0 : float
-            Current underlying spot price (unscaled).
-        K : array-like
-            Strike prices.
-        T : array-like
-            Time to maturity (in years).
-        r : array-like
-            Risk-free interest rate (continuous).
-        q : array-like
-            Dividend yield (continuous).
-        kappa : float
-            Mean reversion speed of variance.
-        theta : float
-            Long-run variance level.
-        xi : float
-            Volatility of variance (vol-of-vol).
-        rho : float
-            Correlation between asset and variance Brownian motions.
-        v0 : float
-            Current instantaneous variance.
+        ... [Standard Heston Parameters] ...
+        lamb : float
+            Jump intensity (lambda). Frequency of jumps per year.
+        mu_j : float
+            Mean of log-jump size.
+        sigma_j : float
+            Standard deviation of log-jump size.
             
         Returns:
         --------
         np.ndarray
             Array of computed option prices.
         """
-        # High density grid for numerical stability with large index values
-        N_grid, u_max = 1000, 200.0 # 250, 100.0 ##
+        # High density grid matching your optimized implementation
+        N_grid, u_max = 1000, 200.0
         du = u_max / N_grid
         # Shape: (N_grid, 1)
         u = np.linspace(1e-8, u_max, N_grid)[:, np.newaxis] 
@@ -74,33 +62,49 @@ class HestonAnalyticalPricer:
             # Stability: Ensure xi is not zero
             xi_s = np.maximum(xi, 1e-6)
             
-            # Heston Characteristic Function internals
+            # --- 1. Heston Component (Albrecher 2007) ---
             d = np.sqrt((rho * xi_s * phi * 1j - kappa)**2 + xi_s**2 * (phi * 1j + phi**2))
             g = (kappa - rho * xi_s * phi * 1j - d) / (kappa - rho * xi_s * phi * 1j + d)
             
             exp_neg_dT = np.exp(-d * T_mat)
             
-            # Albrecher (2007) stable formulation
             C = (1/xi_s**2) * ((1 - exp_neg_dT) / (1 - g * exp_neg_dT)) * (kappa - rho * xi_s * phi * 1j - d)
             
             # Log subtraction for branch-cut stability
             D = (kappa * theta / xi_s**2) * ((kappa - rho * xi_s * phi * 1j - d) * T_mat - 
                 2 * (np.log(1 - g * exp_neg_dT) - np.log(1 - g + 1e-15)))
             
-            # Drift uses the actual S0 price
+            # --- 2. Bates Jump Component ---
+            # Martingale Compensator (Mean expected jump size)
+            # k_bar = E[e^J] - 1
+            k_bar = np.exp(mu_j + 0.5 * sigma_j**2) - 1
+            
+            # Jump Characteristic Function part:
+            # Term: lambda * T * ( E[e^{i*phi*J}] - 1 - i*phi*k_bar )
+            # The (- i*phi*k_bar) is the drift correction to keep risk-neutrality
+            
+            # E[e^{i*phi*J}] for Normal J ~ N(mu_j, sigma_j^2)
+            # formula: exp(i*phi*mu - 0.5*phi^2*sigma^2)
+            # Note: phi is complex here, so phi**2 handles the sign correctly
+            e_i_phi_J = np.exp(1j * phi * mu_j - 0.5 * sigma_j**2 * phi**2)
+            
+            jump_part = lamb * T_mat * (e_i_phi_J - 1 - 1j * phi * k_bar)
+
+            # --- 3. Final Assembly ---
+            # Drift uses the actual S0 price (r-q is handled here)
             drift = 1j * phi * np.log(S0 * np.exp((r_mat - q_mat) * T_mat))
-            return np.exp(C * v0 + D + drift)
+            
+            return np.exp(C * v0 + D + drift + jump_part)
 
         # Calculate Characteristic Functions for P1 and P2
         cf_p1 = get_cf(u - 1j)
         cf_p2 = get_cf(u)
         
         # Integration logic using raw K and S0
-        # The term 1/(i*u) handles the integration
         int_p1 = np.real((np.exp(-1j * u * np.log(K_mat)) * cf_p1) / (1j * u * S0 * np.exp((r_mat - q_mat) * T_mat)))
         int_p2 = np.real((np.exp(-1j * u * np.log(K_mat)) * cf_p2) / (1j * u))
         
-        # Gauss-Lobatto style summation (Rectangular approximation here is sufficient with high N)
+        # Gauss-Lobatto style summation
         P1 = 0.5 + (1/np.pi) * np.sum(int_p1 * du, axis=0)
         P2 = 0.5 + (1/np.pi) * np.sum(int_p2 * du, axis=0)
         
@@ -111,9 +115,9 @@ class HestonAnalyticalPricer:
     
     @staticmethod
     def price_european_call(S0, K, T, r, q, kappa, theta, xi, rho, v0):
-        return float(HestonAnalyticalPricer.price_european_call_vectorized(S0, K, T, r, q, kappa, theta, xi, rho, v0)[0])
+        return float(BatesAnalyticalPricer.price_european_call_vectorized(S0, K, T, r, q, kappa, theta, xi, rho, v0)[0])
 
     @staticmethod
     def price_european_put(S0, K, T, r, q, kappa, theta, xi, rho, v0):
-        call = HestonAnalyticalPricer.price_european_call(S0, K, T, r, q, kappa, theta, xi, rho, v0)
+        call = BatesAnalyticalPricer.price_european_call(S0, K, T, r, q, kappa, theta, xi, rho, v0)
         return call - S0 * np.exp(-q * T) + K * np.exp(-r * T)

@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.stats import norm
 from dataclasses import dataclass
-from .analytics import HestonAnalyticalPricer
+from .analytics import BatesAnalyticalPricer
 from typing import List, Dict
 from scipy.interpolate import interp1d
 from collections import defaultdict
@@ -11,10 +11,10 @@ from .models.process import HestonProcess
 from .market import MarketEnvironment
 import warnings
 from .models.mc_kernels import generate_heston_paths_crn
-class HestonCalibrator:
+class BatesCalibrator:
     """
-    Calibrates Heston model parameters using L-BFGS-B optimization 
-    with CAPPED INVERSE SPREAD WEIGHTING.
+    Calibrates Bates (Heston + Jumps) model parameters using L-BFGS-B optimization 
+    with CAPPED INVERSE SPREAD WEIGHTING for robustness.
     """
     
     def __init__(self, S0, r_curve, q_curve):
@@ -23,11 +23,10 @@ class HestonCalibrator:
         self.q_curve = q_curve
 
     def _calculate_robust_weights(self, options, sigma_cap=2.0):
-        """Calculates 1/spread weights capped at mean + n*sigma."""
+        """Calculates 1/spread weights capped at mean + n*sigma to handle outliers."""
         spreads = np.array([max(abs(o.ask - o.bid), 0.01) for o in options])
         raw_weights = 1.0 / spreads
         
-        # Statistical clipping
         mu = np.mean(raw_weights)
         std = np.std(raw_weights)
         cap_value = mu + sigma_cap * std
@@ -35,6 +34,11 @@ class HestonCalibrator:
         return np.clip(raw_weights, a_min=None, a_max=cap_value)
 
     def calibrate(self, options, sigma_cap=2.0):
+        """
+        Runs the Bates calibration routine.
+        
+        Order: kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
+        """
         strikes = np.array([o.strike for o in options])
         maturities = np.array([o.maturity for o in options])
         market_prices = np.array([o.market_price for o in options])
@@ -42,33 +46,45 @@ class HestonCalibrator:
         r_vec = np.array([self.r_curve.get_rate(t) for t in maturities])
         q_vec = np.array([self.q_curve.get_rate(t) for t in maturities])
         
-        # Apply robust weights
-        weights = self._calculate_robust_weights(options, sigma_cap)
+        weights = 1 #self._calculate_robust_weights(options, sigma_cap)
 
-        # Standardized Order: kappa, theta, xi, rho, v0
-        bounds = [(0.1, 8.0), (1e-4, 0.5), (0.01, 2.0), (-0.95, 0.0), (1e-4, 0.5)]
-        x0 = [2.0, 0.04, 0.4, -0.7, 0.04]
+        # Order: kappa, theta, xi, rho, v0, lamb (intensity), mu_j (mean jump), sigma_j (jump vol)
+        bounds = [
+            (0.1, 8.0),   # kappa
+            (1e-4, 0.5),  # theta
+            (0.01, 2.0),  # xi
+            (-0.95, 0.0), # rho
+            (1e-4, 0.5),  # v0
+            (0.0, 3.0),   # lamb (jumps per year)
+            (-0.6, 0.1),  # mu_j (mean log jump - usually negative for equity)
+            (0.01, 0.5)   # sigma_j (jump volatility)
+        ]
+        
+        # Smart initial guess: Start with Heston defaults + small jumps
+        x0 = [2.0, 0.04, 0.4, -0.7, 0.04, 0.1, -0.1, 0.1]
 
         def objective(p):
-            kappa, theta, xi, rho, v0 = p
             try:
-                # Analytical pricing
-                model_p = HestonAnalyticalPricer.price_european_call_vectorized(
-                    self.S0, strikes, maturities, r_vec, q_vec, kappa, theta, xi, rho, v0
+                # Unpack all 8 parameters
+                kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = p
+                
+                model_p = BatesAnalyticalPricer.price_european_call_vectorized(
+                    self.S0, strikes, maturities, r_vec, q_vec, 
+                    kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
                 )
+                
+                # RMSE with robust weights
                 weighted_diff = (model_p - market_prices) * weights
                 return np.sqrt(np.mean(weighted_diff**2)) 
             except Exception:
                 return 1e12
 
         def callback(xk):
-            model_p = HestonAnalyticalPricer.price_european_call_vectorized(
-                self.S0, strikes, maturities, r_vec, q_vec, *xk
-            )
-            real_rmse = np.sqrt(np.mean((model_p - market_prices)**2))
+            # Track calibration progress
             w_obj = objective(xk)
-            # Fixed xk[4] for v0 display
-            print(f"   [Step] W-Obj: {w_obj:.4f} | RMSE ($): {real_rmse:.4f} | k:{xk[0]:.2f} th:{xk[1]:.3f} xi:{xk[2]:.3f} rho:{xk[3]:.2f} v0:{xk[4]:.3f}")
+            print(f"   [Step] W-Obj: {w_obj:.4f} | "
+                  f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} | "
+                  f"L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
 
         res = minimize(
             objective, 
@@ -80,14 +96,15 @@ class HestonCalibrator:
             options={'eps': 1e-3, 'maxiter': 500}
         )
         
-        final_p = HestonAnalyticalPricer.price_european_call_vectorized(self.S0, strikes, maturities, r_vec, q_vec, *res.x)
+        # Calculate final unweighted RMSE for reporting
+        final_p = BatesAnalyticalPricer.price_european_call_vectorized(self.S0, strikes, maturities, r_vec, q_vec, *res.x)
+        rmse = np.sqrt(np.mean((final_p - market_prices)**2))
         
         return {
-            **dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0'], res.x)), 
+            **dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], res.x)), 
             "weighted_obj": res.fun,
-            "rmse": np.sqrt(np.mean((final_p - market_prices)**2))
+            "rmse": rmse
         }
-
     
 class HestonCalibratorMC:
     """

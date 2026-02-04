@@ -8,7 +8,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from typing import List, Dict
-from scipy.interpolate import PchipInterpolator
+from scipy.interpolate import PchipInterpolator, interp1d
 from sklearn.linear_model import LinearRegression
 from concurrent.futures import ThreadPoolExecutor
 
@@ -52,19 +52,18 @@ def fetch_treasury_rates_fred(date_str: str, api_key: str) -> NSSYieldCurve:
             return NSSYieldCurve(curve_fit)
     raise ValueError("Could not fetch FRED rates.")
 
-# --- PART 2: ROBUST DIVIDEND ENGINE ---
 class ImpliedDividendCurve:
     """
     Data-driven dividend engine. Estimates q from Linear Regression 
-    of Put-Call Parity across all pillars.
+    of Put-Call Parity across ALL pillars, including short-dated ones.
     """
     def __init__(self, df: pd.DataFrame, S0_anchor: float, r_curve):
         self.yields = {}
         
-        # STABILITY FILTER: We only use tenors >= 1 Month (0.07) for the curve.
-        # Short-dated noise (<1M) will be handled by flat extrapolation in get_rate().
-        # This effectively "aligns" the 1-week and 2-week with the 1-month anchor.
-        unique_Ts = sorted([t for t in df['T'].unique() if t >= 0.04]) #0.07
+        # FIX 1: Remove the >= 0.04 filter. 
+        # We MUST capture the specific yield for 0W, 1W, 2W options 
+        # because discrete dividends make them totally different from the 1M yield.
+        unique_Ts = sorted([t for t in df['T'].unique()]) 
         
         for T in unique_Ts:
             subset = df[df['T'] == T]
@@ -72,44 +71,66 @@ class ImpliedDividendCurve:
             mask = (subset['STRIKE'] > S0_anchor * 0.90) & (subset['STRIKE'] < S0_anchor * 1.10)
             data = subset[mask].dropna()
             
-            if len(data) < 5: continue
+            # Skip if we have too few points to run a regression
+            if len(data) < 3: continue
             
-            # (C - P) = e^(-rT) * F - e^(-rT) * K
+            # (C - P) = e^(-rT) * (F - K)
+            # Y = A + B * X  ->  (C - P) = [e^(-rT)*F] - [e^(-rT)] * K
+            # Slope (beta) should be roughly -e^(-rT)
+            # Intercept (alpha) should be e^(-rT) * F
+            
             X = data['STRIKE'].values.reshape(-1, 1)
             y = (data['C_MID'] - data['P_MID']).values
             
             reg = LinearRegression().fit(X, y)
             alpha, beta = reg.intercept_, reg.coef_[0]
             
-            if beta < 0:
+            # Check for sanity: beta should be negative (approx -1)
+            if beta < -0.1: 
+                # F_implied = -alpha / beta
                 F_implied = -alpha / beta
+                
+                # Retrieve risk-free rate for this specific T
                 r = r_curve.get_rate(T)
-                # q = r - ln(F/S0)/T
-                q = r - np.log(F_implied / S0_anchor) / T
-                # Clamp to realistic SPX range
-                self.yields[T] = max(0.0001, min(q, 0.05))
+                
+                # FIX 2: Calculate q exactly for this T, no clamping yet.
+                # q = r - ln(F/S0) / T
+                # We handle T approx 0 to avoid division by zero
+                if T > 1e-4:
+                    q = r - np.log(F_implied / S0_anchor) / T
+                else:
+                    q = 0.0 # Fallback for expiry day
+                
+                # FIX 3: Widen the clamp. 
+                # Short-term implied continuous yields can be negative or large 
+                # purely due to the math of approximating discrete divs with continuous q.
+                # We trust the math here to align the Forward price.
+                self.yields[T] = max(-0.05, min(q, 0.10))
 
         mats = np.array(sorted(self.yields.keys()))
         vals = np.array([self.yields[m] for m in mats])
         
         if len(mats) > 1:
-            self.interpolator = PchipInterpolator(mats, vals, extrapolate=False)
+            # FIX 4: Use linear interpolation for stability between pillars.
+            # Pchip is great for smooth curves, but yields can be jagged.
+            self.interpolator = interp1d(mats, vals, kind='linear', 
+                                         bounds_error=False, 
+                                         fill_value=(vals[0], vals[-1]))
             self.min_T, self.max_T = mats[0], mats[-1]
             self.val_min, self.val_max = vals[0], vals[-1]
         else:
-            default = vals[0] if len(vals) > 0 else 0.013
+            default = vals[0] if len(vals) > 0 else 0.0
             self.interpolator = lambda t: default
             self.min_T, self.max_T, self.val_min, self.val_max = 0, 99, default, default
 
     def get_rate(self, T: float) -> float:
-        # Align short-dated (1W, 2W) with the 1-Month source of truth
         if T < self.min_T: return float(self.val_min)
         if T > self.max_T: return float(self.val_max)
         return float(self.interpolator(T))
     
     def to_dict(self):
         return {str(round(k,3)): v for k,v in self.yields.items()}
-
+    
 # --- PART 3: DATA FETCHING & DYNAMIC SPOT ANCHOR ---
 def fetch_raw_data(ticker_symbol: str) -> pd.DataFrame:
     """Parallel fetch of liquid monthly/quarterly contracts."""
