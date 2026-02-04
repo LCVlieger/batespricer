@@ -42,7 +42,7 @@ class BatesCalibrator:
         strikes = np.array([o.strike for o in options])
         maturities = np.array([o.maturity for o in options])
         market_prices = np.array([o.market_price for o in options])
-        
+        types = np.array([o.option_type for o in options])
         r_vec = np.array([self.r_curve.get_rate(t) for t in maturities])
         q_vec = np.array([self.q_curve.get_rate(t) for t in maturities])
         
@@ -68,9 +68,9 @@ class BatesCalibrator:
                 # Unpack all 8 parameters
                 kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = p
                 
-                model_p = BatesAnalyticalPricer.price_european_call_vectorized(
-                    self.S0, strikes, maturities, r_vec, q_vec, 
-                    kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
+                model_p = BatesAnalyticalPricer.price_vectorized(
+                self.S0, strikes, maturities, r_vec, q_vec, types, # Pass types here
+                kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
                 )
                 
                 # RMSE with robust weights
@@ -95,9 +95,8 @@ class BatesCalibrator:
             tol=1e-9, 
             options={'eps': 1e-3, 'maxiter': 500}
         )
-        
         # Calculate final unweighted RMSE for reporting
-        final_p = BatesAnalyticalPricer.price_european_call_vectorized(self.S0, strikes, maturities, r_vec, q_vec, *res.x)
+        final_p = BatesAnalyticalPricer.price_vectorized(self.S0, strikes, maturities, r_vec, q_vec, types, *res.x)
         rmse = np.sqrt(np.mean((final_p - market_prices)**2))
         
         return {

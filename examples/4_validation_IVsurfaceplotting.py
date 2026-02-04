@@ -203,13 +203,13 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                     iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, opt.option_type)
                     
                     # 2. EXACT MODEL IV (Bates)
-                    prices_mod = BatesAnalyticalPricer.price_european_call_vectorized(
-                        S0, np.array([opt.strike]), np.array([t_mkt]), np.array([r_T_mkt]), np.array([q_T_mkt]), 
+                    prices_mod = BatesAnalyticalPricer.price_vectorized(
+                        S0, np.array([opt.strike]), np.array([t_mkt]), np.array([r_T_mkt]), np.array([q_T_mkt]), opt.option_type,
                         kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
                     )
                     price_mod = float(prices_mod[0])
                     
-                    iv_mod_exact = implied_volatility(price_mod, S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, "CALL")
+                    iv_mod_exact = implied_volatility(price_mod, S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, opt.option_type)
 
                     if iv_mkt < 0.01 or iv_mkt > 2.5: continue
                 except: 

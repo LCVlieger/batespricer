@@ -65,8 +65,8 @@ class ImpliedDividendCurve:
         # pricing needles for short-dated ITM/OTM wings.
         # Format: {Maturity_Years: Yield_Value}
         manual_pins = {
-            0.019: -0.055,  # 1-Week: Pinning at -5.5%
-            0.041: -0.030   # 2-Weeks: Pinning at -3.0%
+            0.019: 0.1, #-0.055,  # 1-Week: Pinning at -5.5%
+            0.041: 0.1 #-0.030   # 2-Weeks: Pinning at -3.0%
         }
         
         unique_Ts = sorted([t for t in df['T'].unique()]) 

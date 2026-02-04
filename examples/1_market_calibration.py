@@ -59,13 +59,14 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, options):
     # Vectorize the validation pass for speed (instead of loop)
     strikes = np.array([o.strike for o in options])
     mats = np.array([o.maturity for o in options])
+    types = np.array([o.option_type for o in options])
     mkt_prices = np.array([o.market_price for o in options])
     r_vec = np.array([r_curve.get_rate(t) for t in mats])
     q_vec = np.array([q_curve.get_rate(t) for t in mats])
 
     # Price all at once using the vectorized engine
-    model_prices = BatesAnalyticalPricer.price_european_call_vectorized(
-        S0, strikes, mats, r_vec, q_vec, *p_ana_params
+    model_prices = BatesAnalyticalPricer.price_vectorized(
+        S0, strikes, mats, r_vec, q_vec, types, *p_ana_params
     )
 
     for i, opt in enumerate(options):
@@ -76,8 +77,8 @@ def save_results(ticker, S0, r_curve, q_curve, res_ana, options):
         weighted_sq_err_ana.append((err_ana * normalized_weights[i])**2)
         
         # Calculate Implied Vol only for reporting
-        iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, opt.maturity, r, q, "CALL")
-        iv_model = implied_volatility(model_p, S0, opt.strike, opt.maturity, r, q, "CALL")
+        iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, opt.maturity, r, q, opt.option_type)
+        iv_model = implied_volatility(model_p, S0, opt.strike, opt.maturity, r, q, opt.option_type)
         rows.append({
             "T": round(opt.maturity, 3), 
             "K": opt.strike, 
@@ -146,22 +147,18 @@ def main():
     
     options_raw = fetch_options(ticker, S0_actual, target_size=300)
     
-    # 2. Processing (Synthetic Calls)
-    # --- 2. Processing (CLEAN OTM DATA) ---
     options_processed = []
     print(f"Processing {len(options_raw)} RAW OTM options...")
-
+    
     for opt in options_raw:
-        # 1. Filter out the noise
+        # Filter for liquidity and standard moneyness
         moneyness = opt.strike / S0_actual
         if opt.maturity < 0.05 and (moneyness < 0.94 or moneyness > 1.06):
             continue
-        
         if opt.market_price < 0.50:
             continue
-
-        # 2. DO NOT CONVERT. Keep Puts as Puts, Calls as Calls.
-        # The calibrator handles the 'types' array internally.
+            
+        # KEEP THE RAW DATA. If it's a PUT, leave it as a PUT.
         options_processed.append(opt)
     
     # 3. Calibration
