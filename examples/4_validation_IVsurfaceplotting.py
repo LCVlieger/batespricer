@@ -244,7 +244,26 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         
         ax.grid(True, color='gray', linestyle=':', linewidth=0.5, alpha=0.3)
         ax.view_init(elev=28, azim=-115) 
+        files = glob.glob("results/calibration_*_prices.csv")
+        if files:
+            # Pick the latest file
+            latest_file = max(files, key=os.path.getctime)
+        csv_file = pd.read_csv(latest_file)
+        base_name = csv_file.replace("_prices.csv", "")
+        json_file = f"{base_name}_meta.json"
+        try:
+            if "calibration_" in base_name:
+                ticker = base_name.split("calibration_")[1].split("_")[0]
 
+            with open(json_file, 'r') as f:
+                meta = json.load(f)
+                s0 = meta['market']['S0']
+                params = meta.get('analytical', {})
+                # Also check if params are in a deeper 'bates' key or similar, 
+                # but usually they are at the top of 'analytical'
+        except Exception:
+            pass    
+        s0 = 6898.4
         # --- TITLES ---
         model_name = "Bates" if is_bates else "Heston"
         fig.text(0.535, 0.84, rf"{model_name} Implied Volatility Surface: {ticker}", 
@@ -252,7 +271,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         
         if is_bates:
             subtitle = (rf"$\kappa={kappa:.2f}, \theta={theta:.2f}, \xi={xi:.2f}, \rho={rho:.2f}, v_0={v0:.3f}$" + "\n" +
-                        rf"$\lambda={lamb:.2f}, \mu_J={mu_j:.2f}, \sigma_J={sigma_j:.2f}$")
+                        rf"$\lambda={lamb:.2f}, \mu_J={mu_j:.2f}, \sigma_J={sigma_j:.2f}, S_0={s0:.1f}$")
             fig.text(0.535, 0.79, subtitle, color='#AAAAAA', fontsize=9, family='monospace', ha='center')
         else:
             subtitle = rf"$\kappa={kappa:.2f}, \theta={theta:.2f}, \xi={xi:.2f}, \rho={rho:.2f}, v_0={v0:.3f}$"
