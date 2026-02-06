@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 # --- CONFIGURATION: THE BOX SPREAD ---
 # SPX options trade on a rate higher than Treasuries (Box Spread/SOFR).
-# Currently, this spread is approximately 40-50 basis points (0.0045).
+# Currently, this spread is approximately 40-50 basis points (0.0045). #
 BOX_SPREAD = 0.0045
 
 @dataclass
