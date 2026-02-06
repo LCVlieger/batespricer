@@ -128,7 +128,7 @@ def print_curves(r_curve, q_curve):
 def main():
     FRED_API_KEY = os.getenv("FRED_API_KEY")
     target_date = datetime.now().strftime("%Y-%m-%d")
-    ticker = "NVDA" 
+    ticker = "SPY" 
     
     print(f"Initializing Bates MC Calibration for {ticker}...")
     
@@ -172,11 +172,20 @@ def main():
         (0.01, 3.0),   # xi (Capped for stability)
         (-0.99, -0.0), # rho 
         (v0_min, v0_max), #(0.005, 0.5),  # v0 (Floor raised to avoid clipping) ###!
-        (0.0, 5.0),    # lamb 
+        (0.5, 5.0),    # lamb 
         (-0.5, 0.0),   # mu_j (Forced negative for SPX crashes)
         (0.01, 0.5)    # sigma_j 
     ]
-    
+    bounds = [
+    (0.5, 10.0),   # kappa: Mean reversion speed
+    (0.01, 0.10),  # theta: Long-run variance (SPY vol is usually 10-30%, so 0.01-0.09)
+    (0.1, 1.5),    # xi: Vol of Vol (usually ~0.5 for Indices)
+    (-0.99, -0.5), # rho: Strong negative correlation is guaranteed for SPY
+    (0.005, 0.10), # v0: Current Variance (7% to 31% Vol range)
+    (0.1, 3.0),    # lambda: Jump intensity (Moderate frequency)
+    (-0.3, -0.01), # mu_j: Negative jumps (Crashes)
+    (0.01, 0.3)    # sigma_j: Jump volatility
+]
     # Initial Guess (Standard Bates)
     x0 = [2.0, fixed_v0, 1.0, -0.7, fixed_v0, 0.1, -0.1, 0.1]#x0 = [2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
     

@@ -18,10 +18,10 @@ from heston_pricer.data import (
 # =================================================================
 # 3. SAVING & VALIDATION 
 # =================================================================
-def save_results(ticker, S0, r_curve, q_curve, res_params, options, mc_calibrator):
+def save_results(ticker, S0, r_curve, q_curve, res_params, options):
     os.makedirs("results", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base_name = f"results/calibration_MC_{ticker}_{timestamp}"
+    base_name = f"results/calibration_Analytic_{ticker}_{timestamp}"
     
     tenors = [(0.02, "1 week"), (0.04, "2 weeks"), (0.0833, "1 Month"), (0.25, "3 Months"), (0.5, "6 Months"), (1.0, "1 Year")]
     r_sample = {f"{t:.4f}Y": float(r_curve.get_rate(t)) for t, label in tenors}
@@ -39,17 +39,20 @@ def save_results(ticker, S0, r_curve, q_curve, res_params, options, mc_calibrato
         p_values = [res_params[k] for k in keys]
     else:
         p_values = list(res_params.x)
-
+    print(p_values)
+    strikes = np.array([o.strike for o in options])
+    mats = np.array([o.maturity for o in options])
+    types = np.array([o.option_type for o in options])
+    r_T = np.array([r_curve.get_rate(o.maturity) for o in options])
+    q_T = np.array([q_curve.get_rate(o.maturity) for o in options])
+    theta, xi, kappa, rho, v0, lamb, mu_j, sigma_j = p_values
     # 3. Final High-Precision Pass
-    mc_calibrator.n_paths = 50000 
-    mc_calibrator._precompute(options) 
-    model_prices, _, _ = mc_calibrator.get_prices(p_values)
+    model_prices = BatesAnalyticalPricer.price_vectorized(S0, strikes, mats, r_T, q_T, types,  theta, xi, kappa, rho, v0, lamb, mu_j, sigma_j )
 
     rows = []
     weighted_sq_err = []
     
-    strikes = np.array([o.strike for o in options])
-    mats = np.array([o.maturity for o in options])
+   
     r_vec = np.array([r_curve.get_rate(t) for t in mats])
     q_vec = np.array([q_curve.get_rate(t) for t in mats])
 
@@ -119,7 +122,7 @@ def print_curves(r_curve, q_curve):
 def main():
     FRED_API_KEY = os.getenv("FRED_API_KEY")
     target_date = datetime.now().strftime("%Y-%m-%d")
-    ticker = "NVDA" #"^SPX"
+    ticker = "SPY" #"^SPX"
     
     print(f"Initializing Bates Calibration for {ticker}...")
     
@@ -132,11 +135,11 @@ def main():
     S0_actual = get_market_implied_spot(ticker, raw_df, r_curve)
     print(f"Market-Consistent Spot: {S0_actual:.2f}")
     
-    q_curve = ImpliedDividendCurve(raw_df, S0_actual, r_curve)
+    q_curve = ImpliedDividendCurve(raw_df, S0_actual, r_curve, ticker)
     print_curves(r_curve, q_curve)
     
     # options_processed no longer contains the .forward field
-    options_processed = fetch_options(ticker, S0_actual, target_size=300)
+    options_processed = fetch_options(ticker, S0_actual, target_size=150)
     print(f"Processing {len(options_processed)} standard OTM options...")
     
     # 3. Calibration

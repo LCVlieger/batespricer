@@ -92,8 +92,7 @@ class BatesCalibrator:
         ]
         
         # Initial Guess: Standard Heston + Moderate Jumps
-        x0 = [2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
-
+        x0 = [3.2, 0.040, 0.82, -0.74, 0.022, 0.0376, -0.47, 0.37] #[2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
         def objective(p):
             try:
                 kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = p
@@ -121,7 +120,7 @@ class BatesCalibrator:
             w_obj = objective(xk)
             print(f"   [Step] W-Obj: {w_obj:.4f} | "
 
-                  f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} | "
+                  f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}| "
 
                   f"L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
 
@@ -132,7 +131,7 @@ class BatesCalibrator:
             method='L-BFGS-B',
             bounds=bounds, 
             callback=callback, 
-            tol=1e-8, 
+            tol=1e-8, ######1e-8
             options={'eps': 1e-4, 'maxiter': 500} # Larger eps for smoother gradients
         )
         

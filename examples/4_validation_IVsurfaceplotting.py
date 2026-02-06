@@ -290,7 +290,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         save_path = f"{filename}_surface_refined.png"
         plt.savefig(save_path, dpi=300, facecolor='black', bbox_inches='tight')
         print(f"-> Saved: {save_path}")
-        plt.show()
+        #plt.show()
 
 def main():
     try:
