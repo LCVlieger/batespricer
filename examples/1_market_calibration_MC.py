@@ -126,7 +126,7 @@ def print_curves(r_curve, q_curve):
 def main():
     FRED_API_KEY = os.getenv("FRED_API_KEY")
     target_date = datetime.now().strftime("%Y-%m-%d")
-    ticker = "^SPX" 
+    ticker = "NVDA" 
     
     print(f"Initializing Bates MC Calibration for {ticker}...")
     
@@ -135,7 +135,7 @@ def main():
     raw_df = fetch_raw_data(ticker)
     S0_actual = get_market_implied_spot(ticker, raw_df, r_curve)
     print(f"Market-Consistent Spot: {S0_actual:.2f}")
-    q_curve = ImpliedDividendCurve(raw_df, S0_actual, r_curve)
+    q_curve = ImpliedDividendCurve(raw_df, S0_actual, r_curve, ticker)
     print_curves(r_curve, q_curve)
     
     # Load Options
@@ -176,6 +176,7 @@ def main():
             diff = (model_p - market_p)
             w_rmse = np.sqrt(np.mean((diff * weights)**2))
             return w_rmse
+            
         except Exception as e:
             return 1e10
 

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 # --- CONFIGURATION: THE BOX SPREAD ---
 # SPX options trade on a rate higher than Treasuries (Box Spread/SOFR).
-# Currently, this spread is approximately 40-50 basis points (0.0045). #
+# Currently, this spread is approximately 40-50 basis points (0.0045).
 BOX_SPREAD = 0.0045
 
 @dataclass
@@ -67,43 +67,77 @@ def is_third_friday(d: datetime) -> bool:
     """Detects if a date is the 3rd Friday of the month (Standard SPX Monthly)."""
     return d.weekday() == 4 and 15 <= d.day <= 21
 
-def calculate_spx_time_to_maturity(expiry_date: datetime) -> float:
+def calculate_spx_time_to_maturity(expiry_date: datetime, ticker_symbol: str) -> float:
     """Standardizes T for SPX AM vs PM settlement."""
     now = datetime.now()
-    if is_third_friday(expiry_date):
+    
+    # Check for AM Settled Indices (SPX, NDX, RUT, VIX)
+    # Note: SPY, QQQ, and single stocks are PM settled.
+    am_settled_tickers = ["^SPX", "^NDX", "^VIX", "^RUT", "^GDAXI"]
+    is_am_settled = any(ticker_symbol.startswith(t) for t in am_settled_tickers)
+
+    if is_am_settled and is_third_friday(expiry_date):
+        # AM Settlement (9:30 AM ET)
         expiry_settlement = datetime.combine(expiry_date.date(), dt_time(9, 30))
     else:
+        # PM Settlement (4:00 PM ET) - Stocks/ETFs
         expiry_settlement = datetime.combine(expiry_date.date(), dt_time(16, 0))
+        
     delta = expiry_settlement - now
+    # Ensure T is at least 1 minute to avoid divide-by-zero
     return max(delta.total_seconds() / (365.25 * 24 * 3600), 1e-6)
 
 # --- PART 3: DIVIDEND ENGINE ---
 
+# --- PART 3: DIVIDEND ENGINE (HYBRID) ---
+
 class ImpliedDividendCurve:
-    def __init__(self, df: pd.DataFrame, S0_anchor: float, r_curve):
+    def __init__(self, df: pd.DataFrame, S0_anchor: float, r_curve, ticker_symbol: str = ""):
         self.yields = {}
         unique_Ts = sorted(df['T'].unique()) 
         
-        for T in unique_Ts:
-            subset = df[df['T'] == T]
-            atm_idx = (subset['STRIKE'] - S0_anchor).abs().idxmin()
-            atm_opt = subset.loc[atm_idx]
-            
-            # r_curve.get_rate(T) already includes the BOX_SPREAD
-            r = r_curve.get_rate(T)
-            C, P, K = atm_opt['C_MID'], atm_opt['P_MID'], atm_opt['STRIKE']
-            
-            # Put-Call Parity synchronization
-            F_market = (C - P) * np.exp(r * T) + K
-            
-            if T > 1e-4:
-                q_sync = r - np.log(F_market / S0_anchor) / T
-            else:
-                q_sync = 0.0
-            
-            # Clip to realistic equity dividend bounds (usually 1%-3%)
-            self.yields[T] = float(np.clip(q_sync, -0.05, 0.10))
+        # 1. Detect if this is an Index or a Stock
+        # Indices (SPX, NDX) -> Use Market Implied Parity (Your original logic)
+        # Stocks (NVDA, AAPL) -> Use Fundamental Yield (Fixes the 8.9% ghost yield)
+        is_index = ticker_symbol.startswith("^") or ticker_symbol in ["SPX", "NDX", "RUT"]
+        
+        fundamental_q = 0.0
+        if not is_index:
+            try:
+                # Fetch fundamental yield for American stocks
+                t_obj = yf.Ticker(ticker_symbol)
+                raw_q = t_obj.info.get('dividendYield')/100 # Returns e.g. 0.002
+                fundamental_q = raw_q if raw_q is not None else 0.0
+                
+                # Sanity check: If Yahoo returns None or crazy data, default to 0
+                if fundamental_q > 0.15: fundamental_q = 0.0 
+            except:
+                fundamental_q = 0.0
 
+        for T in unique_Ts:
+            if is_index:
+                # === INDEX MODE (IMPLIED PARITY) ===
+                subset = df[df['T'] == T]
+                r = r_curve.get_rate(T)
+                
+                parity_values = (subset['C_MID'] - subset['P_MID']) + subset['STRIKE'] * np.exp(-r * T)
+                S0_q_intercept = np.median(parity_values)
+                
+                if T > 1e-4 and S0_q_intercept > 0:
+                    q_sync = -np.log(S0_q_intercept / S0_anchor) / T
+                else:
+                    q_sync = 0.0
+                
+                # Clip to realistic index bounds
+                self.yields[T] = float(np.clip(q_sync, -0.01, 0.06))
+            
+            else:
+                # === STOCK MODE (FUNDAMENTAL) ===
+                # American options break parity calculations. 
+                # Trusting the fundamental yield is safer and more accurate.
+                self.yields[T] = fundamental_q
+
+        # Interpolation Setup
         mats = np.array(sorted(self.yields.keys()))
         vals = np.array([self.yields[m] for m in mats])
         
@@ -120,88 +154,178 @@ class ImpliedDividendCurve:
 
     def to_dict(self):
         return {str(round(k, 4)): v for k, v in self.yields.items()}
-
+    
 # --- PART 4: DATA FETCHING ---
 
 def fetch_raw_data(ticker_symbol: str) -> pd.DataFrame:
     ticker = yf.Ticker(ticker_symbol)
-    all_exps = ticker.options
+    try:
+        all_exps = ticker.options
+    except:
+        return pd.DataFrame()
+        
+    if not all_exps:
+        return pd.DataFrame()
+
     targets = [0.019, 0.08, 0.17, 0.25, 0.5, 0.75, 1.0, 1.25] 
     
     selected_exps = set()
     for t in targets:
-        best = min(all_exps, key=lambda x: abs(calculate_spx_time_to_maturity(datetime.strptime(x, "%Y-%m-%d")) - t))
+        # FIXED: ticker_symbol is now correctly passed inside the function call
+        best = min(all_exps, key=lambda x: abs(calculate_spx_time_to_maturity(datetime.strptime(x, "%Y-%m-%d"), ticker_symbol) - t))
         selected_exps.add(best)
 
     def fetch_one(exp_str):
         try:
             exp_dt = datetime.strptime(exp_str, "%Y-%m-%d")
-            T = calculate_spx_time_to_maturity(exp_dt)
+            # FIXED: Pass ticker_symbol
+            T = calculate_spx_time_to_maturity(exp_dt, ticker_symbol)
             chain = ticker.option_chain(exp_str)
             df_c = chain.calls[['strike', 'bid', 'ask']].rename(columns={'strike':'STRIKE', 'bid':'bC', 'ask':'aC'})
             df_p = chain.puts[['strike', 'bid', 'ask']].rename(columns={'strike':'STRIKE', 'bid':'bP', 'ask':'aP'})
-            full = df_c.merge(df_p, on='STRIKE')
+            
+            # Use Inner Join for Parity Checks
+            full = df_c.merge(df_p, on='STRIKE', how='inner')
+            if full.empty: return None
+            
             full['C_MID'], full['P_MID'], full['T'] = (full['bC']+full['aC'])/2, (full['bP']+full['aP'])/2, T
             return full
         except: return None
 
-    with ThreadPoolExecutor(max_workers=8) as executor:
+    # Reduce workers for individual stocks to avoid API blocking
+    workers = 4 if ticker_symbol.startswith("^") else 1
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(fetch_one, sorted(list(selected_exps))))
-    return pd.concat([r for r in results if r is not None], ignore_index=True)
+    
+    clean_results = [r for r in results if r is not None and not r.empty]
+    if not clean_results: return pd.DataFrame()
+        
+    return pd.concat(clean_results, ignore_index=True)
 
 def get_market_implied_spot(ticker_symbol: str, raw_df: pd.DataFrame, r_curve) -> float:
     ticker = yf.Ticker(ticker_symbol)
-    S_cash = ticker.fast_info['last_price']
     
+    # === 1. Stock Handling (Prioritize Cash Price) ===
+    # For American Stocks, Parity is unreliable due to early exercise.
+    # We trust the market cash price (history/fast_info).
+    if not ticker_symbol.startswith("^"):
+        try:
+            # Try Fast Info First
+            fi = ticker.fast_info
+            if 'last_price' in fi and fi['last_price'] > 0:
+                return float(fi['last_price'])
+            # Fallback to History
+            hist = ticker.history(period="1d")
+            if not hist.empty:
+                return float(hist['Close'].iloc[-1])
+        except: pass
+        
+    # === 2. Index Handling (Prioritize Parity) ===
+    # For SPX/NDX, the 'Cash' index is often stale or disjoint from options.
+    # We calculate the synthetic spot from Put-Call Parity.
+    
+    if raw_df is None or raw_df.empty:
+        # Fallback if raw_df failed (should rarely happen for major stocks)
+        hist = ticker.history(period="1d")
+        if not hist.empty: return float(hist['Close'].iloc[-1])
+        raise ValueError(f"No data available for {ticker_symbol}")
+
     stable_Ts = sorted([t for t in raw_df['T'].unique() if t >= 0.5])
+    if not stable_Ts: stable_Ts = sorted(raw_df['T'].unique())
+        
     baseline_qs = []
-    
     for T in stable_Ts:
         subset = raw_df[raw_df['T'] == T]
+        if len(subset) < 3: continue
+        
         X = subset['STRIKE'].values.reshape(-1, 1)
         y = (subset['C_MID'] - subset['P_MID']).values
         reg = LinearRegression().fit(X, y)
+        
+        if abs(reg.coef_[0]) < 1e-6: continue
+            
         F_T = -reg.intercept_ / reg.coef_[0]
-        r_T = r_curve.get_rate(T) # Higher market rate
-        baseline_qs.append(r_T - np.log(F_T / S_cash) / T)
-    
-    market_baseline_q = np.median(baseline_qs) if baseline_qs else 0.013
-    
+        r_T = r_curve.get_rate(T) 
+        # Estimate spot assuming q ~ 0 (or historical average) to find implied q
+        # For the spot calculation, we need to iterate, but median q works well.
+        # Here we just want a robust baseline q to sync the spot.
+        # We use a placeholder Spot to back out q, but actually we can just
+        # use the Intercept F_T directly.
+        pass 
+
+    # Simplified Robust Logic for Indices:
+    # Use the nearest expiration (most liquid) to anchor the spot price
     anchor_T = min(raw_df['T'].unique(), key=lambda x: abs(x - 0.0833))
     subset_anchor = raw_df[raw_df['T'] == anchor_T]
-    reg_a = LinearRegression().fit(subset_anchor['STRIKE'].values.reshape(-1, 1), 
-                                   (subset_anchor['C_MID'] - subset_anchor['P_MID']).values)
-    F_anchor = -reg_a.intercept_ / reg_a.coef_[0]
-    r_anchor = r_curve.get_rate(anchor_T)
     
-    # Synchronization using market-consistent rates ensures S0 is spot-on
-    S0_synchronized = F_anchor / np.exp((r_anchor - market_baseline_q) * anchor_T)
-    return float(S0_synchronized)
+    if len(subset_anchor) > 5:
+        reg_a = LinearRegression().fit(subset_anchor['STRIKE'].values.reshape(-1, 1), 
+                                       (subset_anchor['C_MID'] - subset_anchor['P_MID']).values)
+        if abs(reg_a.coef_[0]) > 1e-5:
+            F_anchor = -reg_a.intercept_ / reg_a.coef_[0]
+            r_anchor = r_curve.get_rate(anchor_T)
+            # Assume a baseline dividend yield (approx 1.3% for SPX) or 0 for now to get Spot
+            # Better: Calculate q from longer dated options and back-propagate
+            market_baseline_q = 0.01 if ticker_symbol.startswith("^") else 0.0
+            
+            S0_synchronized = F_anchor / np.exp((r_anchor - market_baseline_q) * anchor_T)
+            return float(S0_synchronized)
+
+    # Absolute fallback
+    hist = ticker.history(period="1d")
+    return float(hist['Close'].iloc[-1])
 
 def fetch_options(ticker_symbol: str, S0: float, target_size: int = 300) -> List[MarketOption]:
+    if np.isnan(S0): return []
+
     ticker = yf.Ticker(ticker_symbol)
+    try:
+        all_exps = ticker.options
+    except: return []
+
     valid_exps = []
-    for e in ticker.options:
-        t_val = calculate_spx_time_to_maturity(datetime.strptime(e, "%Y-%m-%d"))
-        if 0.04 <= t_val <= 1.3:
-            valid_exps.append(e)
+    for e in all_exps:
+        try:
+            # FIXED: Pass ticker_symbol
+            t_val = calculate_spx_time_to_maturity(datetime.strptime(e, "%Y-%m-%d"), ticker_symbol)
+            if 0.04 <= t_val <= 1.3:
+                valid_exps.append(e)
+        except: continue
     
     def process(exp_str):
         try:
             exp_dt = datetime.strptime(exp_str, "%Y-%m-%d")
-            T = calculate_spx_time_to_maturity(exp_dt)
+            # FIXED: Pass ticker_symbol
+            T = calculate_spx_time_to_maturity(exp_dt, ticker_symbol)
             chain = ticker.option_chain(exp_str)
             local = []
-            for opt_type, data, f in [('PUT', chain.puts, lambda k: k < S0), ('CALL', chain.calls, lambda k: k > S0)]:
-                subset = data[f(data['strike']) & (data['strike'] > S0*0.75) & (data['strike'] < S0*1.25)]
+            
+            # === CRITICAL FOR AMERICAN OPTIONS: STRICT OTM FILTERING ===
+            # We filter strictly for Out-of-the-Money (OTM) options.
+            # ITM American options carry early exercise premiums that distort the curve.
+            # OTM Calls (K > S0) and OTM Puts (K < S0) are "cleaner".
+            
+            # Using 1.02 and 0.98 buffers to avoid ATM noise
+            for opt_type, data, f in [('PUT', chain.puts, lambda k: k < S0 * 0.98), 
+                                      ('CALL', chain.calls, lambda k: k > S0 * 1.02)]:
+                
+                # Broad strike filter around spot (70% - 130%)
+                subset = data[f(data['strike']) & (data['strike'] > S0*0.70) & (data['strike'] < S0*1.30)]
+                
                 for _, row in subset.iterrows():
                     mid, bid, ask = (row['bid']+row['ask'])/2, row['bid'], row['ask']
-                    if mid > 0.1 and bid > 0 and (ask-bid)/max(mid, 0.01) < 0.25:
+                    
+                    # Spread & Liquidity Filters
+                    if mid > 0.05 and bid > 0 and (ask-bid)/max(mid, 0.01) < 0.25:
                         local.append(MarketOption(row['strike'], T, mid, opt_type, bid, ask))
             return local
         except: return []
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    # Workers = 4 for Index, 1 for Stock to be safe
+    workers = 4 if ticker_symbol.startswith("^") else 1
+    
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         results = list(executor.map(process, valid_exps))
     
     all_c = [item for sublist in results for item in sublist]

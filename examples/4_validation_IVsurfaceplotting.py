@@ -99,25 +99,12 @@ def load_latest_calibration():
     return data, r_curve, q_curve, market_options, base_name
 
 def select_best_parameters(data):
-    res_ana = data.get('analytical', {})
-    res_mc = data.get('monte_carlo', {})
-
-    # Support both old 'fun' and new 'weighted_obj'
-    def get_score(res):
-        if not res: return float('inf')
-        return res.get('weighted_obj', res.get('fun', float('inf')))
-
-    score_ana = get_score(res_ana)
-    score_mc = get_score(res_mc)
-    if score_mc < score_ana:
-        print(f"\n[Selection] Monte Carlo Win (Err: {score_mc:.4f} < Ana: {score_ana:.4f})")
-        return res_mc, "Monte Carlo"
-    elif res_mc < float('inf'):
-        print(f"\n[Selection] Analytical Win (Err: {score_ana:.4f} < MC: {score_mc:.4f})")
-        return res_mc, "Analytical"
-    else:
-        print("\n[Selection] No valid results found. Using default guess.")
-        return {'kappa':2.0, 'theta':0.04, 'xi':0.5, 'rho':-0.7, 'v0':0.04}, "Default"
+    res_mc = data.get('analytical', {})
+    print(data)
+    print(res_mc)
+    # Support both old 'fun' and new 'weighted_obj
+    return res_mc, "Monte Carlo"
+    
 
 # --- 2. EXACT PLOTTING FUNCTION (Updated for Bates) ---
 def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, market_options, data_full, dropped_count, source_name):
