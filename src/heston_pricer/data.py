@@ -25,6 +25,7 @@ class MarketOption:
     option_type: str = "CALL" 
     bid: float = 0.0
     ask: float = 0.0
+    spread: float = 0.0 # Capture real spread for CSV/Weights
 
 # --- PART 1: RATE ENGINE ---
 class NSSYieldCurve:
@@ -206,75 +207,57 @@ def fetch_raw_data(ticker_symbol: str) -> pd.DataFrame:
 def get_market_implied_spot(ticker_symbol: str, raw_df: pd.DataFrame, r_curve) -> float:
     ticker = yf.Ticker(ticker_symbol)
     
-    # === 1. Stock Handling (Prioritize Cash Price) ===
-    # For American Stocks, Parity is unreliable due to early exercise.
-    # We trust the market cash price (history/fast_info).
+    # === 1. STOCK LOGIC: Prioritize Cash Price ===
+    # We use the updated 'fast_info' logic for anything without the '^' prefix.
     if not ticker_symbol.startswith("^"):
         try:
-            # Try Fast Info First
             fi = ticker.fast_info
             if 'last_price' in fi and fi['last_price'] > 0:
                 return float(fi['last_price'])
-            # Fallback to History
+            
             hist = ticker.history(period="1d")
             if not hist.empty:
                 return float(hist['Close'].iloc[-1])
-        except: pass
-        
-    # === 2. Index Handling (Prioritize Parity) ===
-    # For SPX/NDX, the 'Cash' index is often stale or disjoint from options.
-    # We calculate the synthetic spot from Put-Call Parity.
+        except Exception: 
+            pass # Fallback to parity if cash fetch fails
+
+    # === 2. INDEX LOGIC: Your EXACT Original Regression Path ===
+    # If it's an index (or stock fetch failed), use the linear regression logic.
     
     if raw_df is None or raw_df.empty:
-        # Fallback if raw_df failed (should rarely happen for major stocks)
         hist = ticker.history(period="1d")
         if not hist.empty: return float(hist['Close'].iloc[-1])
         raise ValueError(f"No data available for {ticker_symbol}")
 
-    stable_Ts = sorted([t for t in raw_df['T'].unique() if t >= 0.5])
-    if not stable_Ts: stable_Ts = sorted(raw_df['T'].unique())
-        
-    baseline_qs = []
-    for T in stable_Ts:
-        subset = raw_df[raw_df['T'] == T]
-        if len(subset) < 3: continue
-        
-        X = subset['STRIKE'].values.reshape(-1, 1)
-        y = (subset['C_MID'] - subset['P_MID']).values
-        reg = LinearRegression().fit(X, y)
-        
-        if abs(reg.coef_[0]) < 1e-6: continue
-            
-        F_T = -reg.intercept_ / reg.coef_[0]
-        r_T = r_curve.get_rate(T) 
-        # Estimate spot assuming q ~ 0 (or historical average) to find implied q
-        # For the spot calculation, we need to iterate, but median q works well.
-        # Here we just want a robust baseline q to sync the spot.
-        # We use a placeholder Spot to back out q, but actually we can just
-        # use the Intercept F_T directly.
-        pass 
-
-    # Simplified Robust Logic for Indices:
-    # Use the nearest expiration (most liquid) to anchor the spot price
+    # Your original logic: Use the nearest expiration (approx 1 month) to anchor
     anchor_T = min(raw_df['T'].unique(), key=lambda x: abs(x - 0.0833))
     subset_anchor = raw_df[raw_df['T'] == anchor_T]
     
     if len(subset_anchor) > 5:
-        reg_a = LinearRegression().fit(subset_anchor['STRIKE'].values.reshape(-1, 1), 
-                                       (subset_anchor['C_MID'] - subset_anchor['P_MID']).values)
+        # Linear Regression: (C - P) = e^(-rT) * S - e^(-rT) * K
+        # Here we solve for the Forward price F = -intercept / slope
+        X = subset_anchor['STRIKE'].values.reshape(-1, 1)
+        y = (subset_anchor['C_MID'] - subset_anchor['P_MID']).values
+        reg_a = LinearRegression().fit(X, y)
+        
         if abs(reg_a.coef_[0]) > 1e-5:
             F_anchor = -reg_a.intercept_ / reg_a.coef_[0]
             r_anchor = r_curve.get_rate(anchor_T)
-            # Assume a baseline dividend yield (approx 1.3% for SPX) or 0 for now to get Spot
-            # Better: Calculate q from longer dated options and back-propagate
-            market_baseline_q = 0.01 if ticker_symbol.startswith("^") else 0.0
+            
+            # Use your original 1.3% baseline for indices vs 0 for others
+            market_baseline_q = 0.013 if ticker_symbol.startswith("^") else 0.0
             
             S0_synchronized = F_anchor / np.exp((r_anchor - market_baseline_q) * anchor_T)
+            
+            print(f"[{ticker_symbol}] Synced Index Spot (Regression) | T={anchor_T:.3f} | S0: {S0_synchronized:.3f}")
             return float(S0_synchronized)
 
-    # Absolute fallback
-    hist = ticker.history(period="1d")
-    return float(hist['Close'].iloc[-1])
+    # Absolute fallback to Yahoo History
+    try:
+        hist = ticker.history(period="1d")
+        return float(hist['Close'].iloc[-1])
+    except:
+        return 100.0
 
 def fetch_options(ticker_symbol: str, S0: float, target_size: int = 300) -> List[MarketOption]:
     if np.isnan(S0): return []

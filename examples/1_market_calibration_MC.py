@@ -75,6 +75,8 @@ def save_results(ticker, S0, r_curve, q_curve, res_params, options, mc_calibrato
         rows.append({
             "T": round(opt.maturity, 3), 
             "K": opt.strike, 
+            "Spread": opt.ask - opt.bid,
+            "Weight": 1/max(abs(opt.ask - opt.bid), 0.01),
             "Type": opt.option_type,
             "Market": round(opt.market_price, 2),
             "Model": round(model_p, 2), 
@@ -150,22 +152,33 @@ def main():
     # 3. Optimization Setup
     print(f"\n{'='*20} STARTING MC OPTIMIZATION {'='*20}")
     print("WARNING: This will take significantly longer than analytical calibration.")
-    
+
+    short_opts = [o for o in options_processed if o.maturity < 0.1]
+    # sort by distance to money
+    closest = min(short_opts, key=lambda x: abs(x.strike - S0_actual))
+
+    # Estimate IV (or use the IV_Mkt logic you already have)
+    # roughly: sigma = Price / (0.4 * S * sqrt(T))
+    implied_v0_root = implied_volatility(closest.market_price, S0_actual, closest.strike, closest.maturity, r_curve.get_rate(closest.maturity), q_curve.get_rate(closest.maturity), closest.option_type)
+    fixed_v0 = implied_v0_root ** 2
+    v0_min = fixed_v0 * 0.95
+    v0_max = fixed_v0 * 1.05
+    print(f"LOCKING v0 to Market Reality: {fixed_v0:.4f} (Vol: {implied_v0_root:.1%})")
     # Bounds: k, theta, xi, rho, v0, lamb, mu_j, sigma_j
     # Revised bounds for stability
     bounds = [
         (0.1, 10.0),   # kappa 
         (0.001, 0.5),  # theta 
-        (0.01, 1.5),   # xi (Capped for stability)
+        (0.01, 3.0),   # xi (Capped for stability)
         (-0.99, -0.0), # rho 
-        (0.005, 0.5),  # v0 (Floor raised to avoid clipping)
+        (v0_min, v0_max), #(0.005, 0.5),  # v0 (Floor raised to avoid clipping) ###!
         (0.0, 5.0),    # lamb 
         (-0.5, 0.0),   # mu_j (Forced negative for SPX crashes)
         (0.01, 0.5)    # sigma_j 
     ]
     
     # Initial Guess (Standard Bates)
-    x0 = [2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
+    x0 = [2.0, fixed_v0, 1.0, -0.7, fixed_v0, 0.1, -0.1, 0.1]#x0 = [2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
     
     def objective(p):
         try:
