@@ -228,7 +228,7 @@ class BatesCalibratorMC:
                                     for o in options], dtype=np.int32)
 
         # 4. Noise Generation (Stay as is)
-        if self.z_noise is None or self.z_noise.shape[2] != self.n_paths:
+        if (self.z_noise is None or self.z_noise.shape[1] != self.min_n_steps or self.z_noise.shape[2] != self.n_paths):
             rng = np.random.default_rng(42)
             # Shapes updated to match your generator: (4, n_steps, n_paths)
             self.z_noise = np.zeros((4, self.min_n_steps, self.n_paths))
@@ -237,32 +237,34 @@ class BatesCalibratorMC:
             self.z_noise[2] = rng.random((self.min_n_steps, self.n_paths))
             self.z_noise[3] = rng.standard_normal((self.min_n_steps, self.n_paths))
     def get_prices(self, params):
-        kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = params
-        
-        # 1. Calculate the Jump Compensator (Exact same math as Analytical CF)
-        k_bar = np.exp(mu_j + 0.5 * sigma_j**2) - 1
-        jump_drift_correction = lamb * k_bar
+            kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = params
+            
+            # 1. Generate Paths (Risk Neutral, r=0, q=0)
+            paths = generate_bates_paths_crn(
+                self.S0, 0.0, 0.0, v0, kappa, theta, xi, rho, 
+                lamb, mu_j, sigma_j,
+                self.T_max, self.n_paths, self.min_n_steps, self.z_noise
+            )
 
-        # 2. Generate "Stochastic" Paths (Drift = 0 inside)
-        # Note: Passing 0.0 for r and q to be safe
-        paths = generate_bates_paths_crn(
-            self.S0, 0.0, 0.0, v0, kappa, theta, xi, rho, 
-            lamb, mu_j, sigma_j,
-            self.T_max, self.n_paths, self.min_n_steps, self.z_noise
-        )
+            # =======================================================
+            # DEBUGGING: CHECK MARTINGALE PROPERTY
+            # =======================================================
+            # The mean of the final paths SHOULD be S0 (approx).
+            # If Ratio is 0.90, you have a 10% downward drift error.
+            # If Ratio is 1.10, you have a 10% upward drift error.
+            
+            avg_terminal = np.mean(paths[:, -1])
+            ratio = avg_terminal / self.S0
+            # Only print if we are significantly off (e.g., > 1% error)
+            if abs(ratio - 1.0) > 0.01:
+                print(f"CRITICAL DRIFT ERROR: Ratio={ratio:.4f} | S0={self.S0:.2f} Avg_Sim={avg_terminal:.2f}")
+                print(f"Params -> Lamb: {lamb:.4f}, Mu_J: {mu_j:.4f}, Xi: {xi:.4f}")
+            # =======================================================
 
-        # 3. Apply the TOTAL drift in the Price Engine
-        # adj_factor = e^((r - q - compensator) * T)
-        # This aligns the MC expectation perfectly with the Analytical Forward.
-        model_prices = _numba_price_engine(
-            paths, 
-            self.f_time_idxs, 
-            self.f_strikes, 
-            self.f_is_call, 
-            self.f_rates, 
-            self.f_qs, 
-            jump_drift_correction, # This is used as (r - q - jump_drift_correction) * T
-            self.f_maturities
-        )
-        
-        return model_prices, self.f_market_prices, self.f_weights
+            # 3. Pricing Engine
+            model_prices = _numba_price_engine(
+                paths, self.f_time_idxs, self.f_strikes, self.f_is_call, 
+                self.f_rates, self.f_qs, 0.0, self.f_maturities
+            )
+            
+            return model_prices, self.f_market_prices, self.f_weights

@@ -44,7 +44,7 @@ def generate_heston_paths(S0, r, q, v0, kappa, theta, xi, rho, T, n_paths, n_ste
     prices[:, 0] = S0
     
     curr_v = np.full(n_paths, v0)
-    curr_s = np.full(n_paths, S0)
+    curr_s = np.full(n_paths, S0, dtype=np.float64)
     
     for j in range(n_steps):
         Z1 = np.random.standard_normal(n_paths)
@@ -155,14 +155,15 @@ def generate_bates_paths_crn(S0, r, q, v0, kappa, theta, xi, rho, lamb, mu_j, si
     sqrt_dt = np.sqrt(dt)
     c1, c2 = rho, np.sqrt(1 - rho**2)
     
-    # We REMOVE r, q, and drift_correction here. 
-    # We want the paths to be "driftless" so we can apply the exact forward later.
-    
+    # Calculate Compensator Internally
+    k_bar = np.exp(mu_j + 0.5 * sigma_j**2) - 1
+    drift_correction = lamb * k_bar
+    jump_prob = lamb * dt
+
     prices = np.zeros((n_paths, n_steps + 1))
     prices[:, 0] = S0
     curr_v = np.full(n_paths, v0)
     curr_s = np.full(n_paths, S0)
-    jump_prob = lamb * dt
     
     for j in range(n_steps):
         Z1 = noise_matrix[0, j, :n_paths] 
@@ -173,16 +174,14 @@ def generate_bates_paths_crn(S0, r, q, v0, kappa, theta, xi, rho, lamb, mu_j, si
         Zv = c1 * Z1 + c2 * Z2
         v_t = np.maximum(curr_v, 0.0)
         
-        # Vectorized jump logic (pure jump, no compensator here)
         jump_mag = np.where(U_jump < jump_prob, mu_j + sigma_j * Z_size, 0.0)
         
-        # Asset Update: NO r, NO q, NO drift_correction
-        # We only keep the Martingale parts: -0.5*v_t*dt and the diffusions
-        drift_term = (-0.5 * v_t) * dt 
+        # FIX: Include r, q, and drift_correction
+        drift_term = (r - q - 0.5 * v_t - drift_correction) * dt 
         diff_term = np.sqrt(v_t) * sqrt_dt * Z1
+        
         curr_s *= np.exp(drift_term + diff_term + jump_mag)
         
-        # Variance Update (stays the same)
         curr_v += kappa * (theta - v_t) * dt + xi * np.sqrt(v_t) * sqrt_dt * Zv
         prices[:, j + 1] = curr_s
         
