@@ -175,7 +175,7 @@ def save_results(ticker, S0, r_curve, q_curve, res_params, options, mc_calibrato
     print(f"Weighted Objective: {w_obj:.4f}")
     print("="*80)
     print(f"Saved results to: {base_name}_prices.csv")
-    
+
 def print_curves(r_curve, q_curve):
     print("\n" + "="*60)
     print(f"{'Tenor':<10} | {'Market Rate (r)':<15} | {'Div Yield (q)':<15}")
@@ -186,19 +186,20 @@ def print_curves(r_curve, q_curve):
         print(f"{label:<10} | {r_curve.get_rate(t)*100:>13.4f}% | {q_curve.get_rate(t)*100:>13.4f}%")
     print("="*60 + "\n")
 
+
 # =================================================================
 # 4. MAIN EXECUTION
 # =================================================================
 def main():
     # --- FILE CONFIGURATION ---
-    # We use the SPX files you uploaded
-    json_path = "results/calibration_Analytic_^SPX_20260208_022951_meta.json"
-    csv_path  = "results/calibration_Analytic_^SPX_20260208_022951_prices.csv"
+    # Filenames updated to match your uploaded files
+    json_path = "calibration_Analytic_^SPX_20260208_022951_meta.json"
+    csv_path  = "calibration_Analytic_^SPX_20260208_022951_prices.csv"
     ticker = "^SPX" 
     
     print(f"Initializing Bates MC Calibration for {ticker} using LOCAL FILES...")
     
-    # --- 1. Data Loading (Replaced Fetching) ---
+    # --- 1. Data Loading ---
     with open(json_path, 'r') as f:
         meta_data = json.load(f)
 
@@ -214,7 +215,6 @@ def main():
     df_prices = pd.read_csv(csv_path)
     options_processed = []
     
-    # Convert CSV rows to objects expected by MC Calibrator
     for _, row in df_prices.iterrows():
         opt = SimpleOption(
             T=row['T'],
@@ -228,253 +228,56 @@ def main():
     print(f"Processing {len(options_processed)} options for MC Calibration...")
     
     # 2. Setup MC Calibrator
-    # Note: Fewer paths/steps for speed during optimization; validation bumps this up
     mc_calib = BatesCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=5000, n_steps=4000)
     mc_calib._precompute(options_processed)
     
     # 3. Optimization Setup
     print(f"\n{'='*20} STARTING MC OPTIMIZATION {'='*20}")
-    print("WARNING: This will take significantly longer than analytical calibration.")
 
     short_opts = [o for o in options_processed if o.maturity < 0.1]
-    # sort by distance to money
     closest = min(short_opts, key=lambda x: abs(x.strike - S0_actual))
 
-    # Estimate IV (or use the IV_Mkt logic you already have)
-    # roughly: sigma = Price / (0.4 * S * sqrt(T))
     implied_v0_root = implied_volatility(closest.market_price, S0_actual, closest.strike, closest.maturity, r_curve.get_rate(closest.maturity), q_curve.get_rate(closest.maturity), closest.option_type)
     fixed_v0 = implied_v0_root ** 2
-    v0_min = fixed_v0 * 0.95
-    v0_max = fixed_v0 * 1.05
+    v0_min, v0_max = fixed_v0 * 0.95, fixed_v0 * 1.05
+    
     print(f"LOCKING v0 to Market Reality: {fixed_v0:.4f} (Vol: {implied_v0_root:.1%})")
-    # Bounds: k, theta, xi, rho, v0, lamb, mu_j, sigma_j
-    # Revised bounds for stability
+
     bounds = [
-        (0.1, 10.0),   # kappa 
-        (0.001, 0.5),  # theta 
-        (0.01, 3.0),   # xi (Capped for stability)
-        (-0.99, -0.0), # rho 
-        (v0_min, v0_max), #(0.005, 0.5),  # v0 (Floor raised to avoid clipping) ###!
-        (0.5, 5.0),    # lamb 
-        (-0.5, 0.0),   # mu_j (Forced negative for SPX crashes)
-        (0.01, 0.5)    # sigma_j 
+        (0.5, 10.0),   # kappa
+        (0.01, 0.10),  # theta
+        (0.1, 1.5),    # xi
+        (-0.99, -0.5), # rho
+        (0.005, 0.10), # v0
+        (0.1, 3.0),    # lambda
+        (-0.3, -0.01), # mu_j
+        (0.01, 0.3)    # sigma_j
     ]
-    bounds = [
-    (0.5, 10.0),   # kappa: Mean reversion speed
-    (0.01, 0.10),  # theta: Long-run variance (SPY vol is usually 10-30%, so 0.01-0.09)
-    (0.1, 1.5),    # xi: Vol of Vol (usually ~0.5 for Indices)
-    (-0.99, -0.5), # rho: Strong negative correlation is guaranteed for SPY
-    (0.005, 0.10), # v0: Current Variance (7% to 31% Vol range)
-    (0.1, 3.0),    # lambda: Jump intensity (Moderate frequency)
-    (-0.3, -0.01), # mu_j: Negative jumps (Crashes)
-    (0.01, 0.3)    # sigma_j: Jump volatility
-]
-    # Initial Guess (Standard Bates)
-    x0 = [2.0, fixed_v0, 1.0, -0.7, fixed_v0, 0.1, -0.1, 0.1]#x0 = [2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
+    
+    x0 = [2.0, fixed_v0, 1.0, -0.7, fixed_v0, 0.1, -0.1, 0.1]
     
     def objective(p):
         try:
-            # Get prices from MC engine
             model_p, market_p, weights = mc_calib.get_prices(p)
-            
-            # Weighted RMSE
             diff = (model_p - market_p)
             w_rmse = np.sqrt(np.mean((diff * weights)**2))
             return w_rmse
-            
-        except Exception as e:
+        except Exception:
             return 1e10
 
     def callback(xk):
         obj_val = objective(xk)
         print(f" [MC-Iter] Obj: {obj_val:10.4f} | "
-      f"v0:{xk[4]:.4f} th:{xk[1]:.4f} ka:{xk[0]:.3f} xi:{xk[2]:.3f} rho:{xk[3]:.2f} | "
-      f"Jumps(L:{xk[5]:.3f} mu:{xk[6]:.3f} sig:{xk[7]:.3f})")
+              f"v0:{xk[4]:.4f} th:{xk[1]:.4f} ka:{xk[0]:.3f} xi:{xk[2]:.3f} rho:{xk[3]:.2f}")
         
     t0 = time.time()
-    
-    # Using SLSQP as it respects bounds strictly
-    res = minimize(
-        objective, 
-        x0, 
-        method='SLSQP', 
-        bounds=bounds, 
-        callback=callback, 
-        tol=1e-8,
-        options={'maxiter': 50, 'eps': 1e-2} 
-    )
+    res = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, tol=1e-8, options={'maxiter': 50, 'eps': 1e-2})
     
     print(f"CALIBRATION DONE (Time: {time.time()-t0:.2f}s)")
     
     final_params = dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], res.x))
     
-    # Detailed Parameter Output (Matching Analytical Style)
-    print("-" * 60)
-    print(f"Heston Component:")
-    print(f"  v0:      {final_params['v0']:.4f}")
-    print(f"  kappa:   {final_params['kappa']:.4f}")
-    print(f"  theta:   {final_params['theta']:.4f}")
-    print(f"  xi:      {final_params['xi']:.4f}")
-    print(f"  rho:     {final_params['rho']:.4f}")
-    print(f"Jump Component (Merton):")
-    print(f"  lambda:   {final_params['lamb']:.4f}  (Jumps per year)")
-    print(f"  mu_J:     {final_params['mu_j']:.4f}  (Mean log-jump size)")
-    print(f"  sigma_J:  {final_params['sigma_j']:.4f}  (Jump size volatility)")
-    print("-" * 60)
-
-    # 4. Saving & Verification
     save_results(ticker, S0_actual, r_curve, q_curve, final_params, options_processed, mc_calib)
-
-if __name__ == "__main__":
-    main()
-def print_curves(r_curve, q_curve):
-    print("\n" + "="*60)
-    print(f"{'Tenor':<10} | {'Market Rate (r)':<15} | {'Div Yield (q)':<15}")
-    print("-" * 60)
-    tenors = [(0.02, "1 week"), (0.04, "2 weeks"), (0.0833, "1 Month"), (0.25, "3 Months"), (0.5, "6 Months"), (1.0, "1 Year")]
-
-    for t, label in tenors:
-        print(f"{label:<10} | {r_curve.get_rate(t)*100:>13.4f}% | {q_curve.get_rate(t)*100:>13.4f}%")
-    print("="*60 + "\n")
-
-# =================================================================
-# 4. MAIN EXECUTION
-# =================================================================
-def main():
-    # --- FILE CONFIGURATION ---
-    # We use the SPX files you uploaded
-    json_path = "results/calibration_Analytic_^SPX_20260208_022951_meta.json"
-    csv_path  = "results/calibration_Analytic_^SPX_20260208_022951_prices.csv"
-    ticker = "^SPX" 
     
-    print(f"Initializing Bates MC Calibration for {ticker} using LOCAL FILES...")
-    
-    # --- 1. Data Loading (Replaced Fetching) ---
-    with open(json_path, 'r') as f:
-        meta_data = json.load(f)
-
-    # Reconstruct Market Data
-    S0_actual = meta_data['market']['S0']
-    r_curve = InterpolatedCurve(meta_data['market']['r_sample'])
-    q_curve = InterpolatedCurve(meta_data['market']['q_sample'])
-    
-    print(f"Market-Consistent Spot: {S0_actual:.2f}")
-    print_curves(r_curve, q_curve)
-    
-    # Load Options from CSV
-    df_prices = pd.read_csv(csv_path)
-    options_processed = []
-    
-    # Convert CSV rows to objects expected by MC Calibrator
-    for _, row in df_prices.iterrows():
-        opt = SimpleOption(
-            T=row['T'],
-            K=row['K'],
-            type_str=row['Type'],
-            price=row['Market'],
-            spread=row['Spread']
-        )
-        options_processed.append(opt)
-
-    print(f"Processing {len(options_processed)} options for MC Calibration...")
-    
-    # 2. Setup MC Calibrator
-    # Note: Fewer paths/steps for speed during optimization; validation bumps this up
-    mc_calib = BatesCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=1000, n_steps=4000)
-    mc_calib._precompute(options_processed)
-    
-    # 3. Optimization Setup
-    print(f"\n{'='*20} STARTING MC OPTIMIZATION {'='*20}")
-    print("WARNING: This will take significantly longer than analytical calibration.")
-
-    short_opts = [o for o in options_processed if o.maturity < 0.1]
-    # sort by distance to money
-    closest = min(short_opts, key=lambda x: abs(x.strike - S0_actual))
-
-    # Estimate IV (or use the IV_Mkt logic you already have)
-    # roughly: sigma = Price / (0.4 * S * sqrt(T))
-    implied_v0_root = implied_volatility(closest.market_price, S0_actual, closest.strike, closest.maturity, r_curve.get_rate(closest.maturity), q_curve.get_rate(closest.maturity), closest.option_type)
-    fixed_v0 = implied_v0_root ** 2
-    v0_min = fixed_v0 * 0.95
-    v0_max = fixed_v0 * 1.05
-    print(f"LOCKING v0 to Market Reality: {fixed_v0:.4f} (Vol: {implied_v0_root:.1%})")
-    # Bounds: k, theta, xi, rho, v0, lamb, mu_j, sigma_j
-    # Revised bounds for stability
-    bounds = [
-        (0.1, 10.0),   # kappa 
-        (0.001, 0.5),  # theta 
-        (0.01, 3.0),   # xi (Capped for stability)
-        (-0.99, -0.0), # rho 
-        (v0_min, v0_max), #(0.005, 0.5),  # v0 (Floor raised to avoid clipping) ###!
-        (0.5, 5.0),    # lamb 
-        (-0.5, 0.0),   # mu_j (Forced negative for SPX crashes)
-        (0.01, 0.5)    # sigma_j 
-    ]
-    bounds = [
-    (0.5, 10.0),   # kappa: Mean reversion speed
-    (0.01, 0.10),  # theta: Long-run variance (SPY vol is usually 10-30%, so 0.01-0.09)
-    (0.1, 1.5),    # xi: Vol of Vol (usually ~0.5 for Indices)
-    (-0.99, -0.5), # rho: Strong negative correlation is guaranteed for SPY
-    (0.005, 0.10), # v0: Current Variance (7% to 31% Vol range)
-    (0.1, 3.0),    # lambda: Jump intensity (Moderate frequency)
-    (-0.3, -0.01), # mu_j: Negative jumps (Crashes)
-    (0.01, 0.3)    # sigma_j: Jump volatility
-]
-    # Initial Guess (Standard Bates)
-    x0 = [2.0, fixed_v0, 1.0, -0.7, fixed_v0, 0.1, -0.1, 0.1]#x0 = [2.0, 0.04, 0.6, -0.7, 0.04, 0.1, -0.1, 0.1]
-    
-    def objective(p):
-        try:
-            # Get prices from MC engine
-            model_p, market_p, weights = mc_calib.get_prices(p)
-            
-            # Weighted RMSE
-            diff = (model_p - market_p)
-            w_rmse = np.sqrt(np.mean((diff * weights)**2))
-            return w_rmse
-            
-        except Exception as e:
-            return 1e10
-
-    def callback(xk):
-        obj_val = objective(xk)
-        print(f" [MC-Iter] Obj: {obj_val:10.4f} | "
-      f"v0:{xk[4]:.4f} th:{xk[1]:.4f} ka:{xk[0]:.3f} xi:{xk[2]:.3f} rho:{xk[3]:.2f} | "
-      f"Jumps(L:{xk[5]:.3f} mu:{xk[6]:.3f} sig:{xk[7]:.3f})")
-        
-    t0 = time.time()
-    
-    # Using SLSQP as it respects bounds strictly
-    res = minimize(
-        objective, 
-        x0, 
-        method='SLSQP', 
-        bounds=bounds, 
-        callback=callback, 
-        tol=1e-8,
-        options={'maxiter': 50, 'eps': 1e-2} 
-    )
-    
-    print(f"CALIBRATION DONE (Time: {time.time()-t0:.2f}s)")
-    
-    final_params = dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], res.x))
-    
-    # Detailed Parameter Output (Matching Analytical Style)
-    print("-" * 60)
-    print(f"Heston Component:")
-    print(f"  v0:      {final_params['v0']:.4f}")
-    print(f"  kappa:   {final_params['kappa']:.4f}")
-    print(f"  theta:   {final_params['theta']:.4f}")
-    print(f"  xi:      {final_params['xi']:.4f}")
-    print(f"  rho:     {final_params['rho']:.4f}")
-    print(f"Jump Component (Merton):")
-    print(f"  lambda:   {final_params['lamb']:.4f}  (Jumps per year)")
-    print(f"  mu_J:     {final_params['mu_j']:.4f}  (Mean log-jump size)")
-    print(f"  sigma_J:  {final_params['sigma_j']:.4f}  (Jump size volatility)")
-    print("-" * 60)
-
-    # 4. Saving & Verification
-    save_results(ticker, S0_actual, r_curve, q_curve, final_params, options_processed, mc_calib)
-
 if __name__ == "__main__":
     main()
