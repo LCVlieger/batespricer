@@ -1,0 +1,1352 @@
+[
+    {
+        "strike": 5700.0,
+        "maturity": 0.04265339908396076,
+        "market_price": 1.075,
+        "option_type": "PUT",
+        "bid": 0.95,
+        "ask": 1.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 6690.0,
+        "maturity": 0.04265339908396076,
+        "market_price": 24.4,
+        "option_type": "PUT",
+        "bid": 24.1,
+        "ask": 24.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6150.0,
+        "maturity": 0.04539124987109286,
+        "market_price": 3.5,
+        "option_type": "PUT",
+        "bid": 3.1,
+        "ask": 3.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6740.0,
+        "maturity": 0.04539124987109286,
+        "market_price": 34.150000000000006,
+        "option_type": "PUT",
+        "bid": 33.6,
+        "ask": 34.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6250.0,
+        "maturity": 0.04812910065822496,
+        "market_price": 5.45,
+        "option_type": "PUT",
+        "bid": 5.0,
+        "ask": 5.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 7080.0,
+        "maturity": 0.04812910065822496,
+        "market_price": 18.65,
+        "option_type": "CALL",
+        "bid": 18.4,
+        "ask": 18.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6525.0,
+        "maturity": 0.050866951445357064,
+        "market_price": 17.4,
+        "option_type": "PUT",
+        "bid": 16.9,
+        "ask": 17.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 5400.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 1.375,
+        "option_type": "PUT",
+        "bid": 1.25,
+        "ask": 1.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 5850.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 2.95,
+        "option_type": "PUT",
+        "bid": 2.8,
+        "ask": 3.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6110.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 5.300000000000001,
+        "option_type": "PUT",
+        "bid": 4.9,
+        "ask": 5.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6265.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 7.95,
+        "option_type": "PUT",
+        "bid": 7.5,
+        "ask": 8.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 6420.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 13.149999999999999,
+        "option_type": "PUT",
+        "bid": 12.7,
+        "ask": 13.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6575.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 23.15,
+        "option_type": "PUT",
+        "bid": 22.9,
+        "ask": 23.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 6730.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 42.400000000000006,
+        "option_type": "PUT",
+        "bid": 42.1,
+        "ask": 42.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 7160.0,
+        "maturity": 0.05360479832373184,
+        "market_price": 8.55,
+        "option_type": "CALL",
+        "bid": 8.4,
+        "ask": 8.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6025.0,
+        "maturity": 0.06181835049496793,
+        "market_price": 5.0,
+        "option_type": "PUT",
+        "bid": 4.6,
+        "ask": 5.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 7075.0,
+        "maturity": 0.06181835049496793,
+        "market_price": 30.6,
+        "option_type": "CALL",
+        "bid": 30.3,
+        "ask": 30.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6550.0,
+        "maturity": 0.06455620087300681,
+        "market_price": 25.1,
+        "option_type": "PUT",
+        "bid": 24.5,
+        "ask": 25.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6425.0,
+        "maturity": 0.06729405126467158,
+        "market_price": 17.75,
+        "option_type": "PUT",
+        "bid": 17.5,
+        "ask": 18.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 6300.0,
+        "maturity": 0.07003189973946053,
+        "market_price": 13.3,
+        "option_type": "PUT",
+        "bid": 12.8,
+        "ask": 13.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5450.0,
+        "maturity": 0.07276975039606941,
+        "market_price": 2.85,
+        "option_type": "PUT",
+        "bid": 2.7,
+        "ask": 3.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 6375.0,
+        "maturity": 0.07276975039606941,
+        "market_price": 18.3,
+        "option_type": "PUT",
+        "bid": 18.0,
+        "ask": 18.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6630.0,
+        "maturity": 0.07276975039606941,
+        "market_price": 40.4,
+        "option_type": "PUT",
+        "bid": 39.8,
+        "ask": 41.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7160.0,
+        "maturity": 0.07276975039606941,
+        "market_price": 17.85,
+        "option_type": "CALL",
+        "bid": 17.6,
+        "ask": 18.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6375.0,
+        "maturity": 0.08098330242825817,
+        "market_price": 19.8,
+        "option_type": "PUT",
+        "bid": 19.3,
+        "ask": 20.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 6400.0,
+        "maturity": 0.08372115182155804,
+        "market_price": 22.65,
+        "option_type": "PUT",
+        "bid": 22.1,
+        "ask": 23.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 6050.0,
+        "maturity": 0.09193470363972546,
+        "market_price": 11.55,
+        "option_type": "PUT",
+        "bid": 11.0,
+        "ask": 12.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6575.0,
+        "maturity": 0.09193470363972546,
+        "market_price": 43.4,
+        "option_type": "PUT",
+        "bid": 42.8,
+        "ask": 44.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7110.0,
+        "maturity": 0.09193470363972546,
+        "market_price": 42.400000000000006,
+        "option_type": "CALL",
+        "bid": 41.7,
+        "ask": 43.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6400.0,
+        "maturity": 0.10014825530449083,
+        "market_price": 28.450000000000003,
+        "option_type": "PUT",
+        "bid": 28.1,
+        "ask": 28.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5000.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 3.5999999999999996,
+        "option_type": "PUT",
+        "bid": 3.4,
+        "ask": 3.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5660.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 8.05,
+        "option_type": "PUT",
+        "bid": 7.6,
+        "ask": 8.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 5920.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 12.149999999999999,
+        "option_type": "PUT",
+        "bid": 11.6,
+        "ask": 12.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6175.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 20.25,
+        "option_type": "PUT",
+        "bid": 19.7,
+        "ask": 20.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6365.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 31.15,
+        "option_type": "PUT",
+        "bid": 30.4,
+        "ask": 31.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6520.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 45.65,
+        "option_type": "PUT",
+        "bid": 44.9,
+        "ask": 46.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 6675.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 68.30000000000001,
+        "option_type": "PUT",
+        "bid": 67.9,
+        "ask": 68.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 7105.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 57.2,
+        "option_type": "CALL",
+        "bid": 56.5,
+        "ask": 57.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 7280.0,
+        "maturity": 0.1103581563816957,
+        "market_price": 14.3,
+        "option_type": "CALL",
+        "bid": 13.8,
+        "ask": 14.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5400.0,
+        "maturity": 0.13026461308296575,
+        "market_price": 7.65,
+        "option_type": "PUT",
+        "bid": 7.2,
+        "ask": 8.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6475.0,
+        "maturity": 0.13026461308296575,
+        "market_price": 49.65,
+        "option_type": "PUT",
+        "bid": 49.0,
+        "ask": 50.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 7090.0,
+        "maturity": 0.13026461308296575,
+        "market_price": 75.0,
+        "option_type": "CALL",
+        "bid": 74.1,
+        "ask": 75.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 5075.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 5.8,
+        "option_type": "PUT",
+        "bid": 5.6,
+        "ask": 6.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 5400.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 8.45,
+        "option_type": "PUT",
+        "bid": 8.2,
+        "ask": 8.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 5620.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 11.25,
+        "option_type": "PUT",
+        "bid": 10.7,
+        "ask": 11.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5800.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 14.600000000000001,
+        "option_type": "PUT",
+        "bid": 14.4,
+        "ask": 14.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6025.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 21.5,
+        "option_type": "PUT",
+        "bid": 20.9,
+        "ask": 22.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6230.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 31.65,
+        "option_type": "PUT",
+        "bid": 31.4,
+        "ask": 31.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6385.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 43.900000000000006,
+        "option_type": "PUT",
+        "bid": 43.2,
+        "ask": 44.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6540.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 61.05,
+        "option_type": "PUT",
+        "bid": 60.3,
+        "ask": 61.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6695.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 85.6,
+        "option_type": "PUT",
+        "bid": 84.8,
+        "ask": 86.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 7125.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 64.75,
+        "option_type": "CALL",
+        "bid": 64.4,
+        "ask": 65.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 7280.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 22.4,
+        "option_type": "CALL",
+        "bid": 21.8,
+        "ask": 23.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7435.0,
+        "maturity": 0.14121601384690216,
+        "market_price": 6.75,
+        "option_type": "CALL",
+        "bid": 6.5,
+        "ask": 7.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 5000.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 8.8,
+        "option_type": "PUT",
+        "bid": 8.3,
+        "ask": 9.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 5730.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 20.75,
+        "option_type": "PUT",
+        "bid": 20.2,
+        "ask": 21.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 5990.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 30.2,
+        "option_type": "PUT",
+        "bid": 29.5,
+        "ask": 30.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6250.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 47.3,
+        "option_type": "PUT",
+        "bid": 46.7,
+        "ask": 47.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6460.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 68.44999999999999,
+        "option_type": "PUT",
+        "bid": 67.8,
+        "ask": 69.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6615.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 90.2,
+        "option_type": "PUT",
+        "bid": 89.2,
+        "ask": 91.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 6770.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 122.25,
+        "option_type": "PUT",
+        "bid": 121.5,
+        "ask": 123.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7225.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 55.75,
+        "option_type": "CALL",
+        "bid": 54.9,
+        "ask": 56.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 7480.0,
+        "maturity": 0.1870179754687619,
+        "market_price": 11.55,
+        "option_type": "CALL",
+        "bid": 11.0,
+        "ask": 12.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 5430.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 18.5,
+        "option_type": "PUT",
+        "bid": 17.9,
+        "ask": 19.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 5825.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 30.700000000000003,
+        "option_type": "PUT",
+        "bid": 30.1,
+        "ask": 31.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 6120.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 47.35,
+        "option_type": "PUT",
+        "bid": 46.6,
+        "ask": 48.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6390.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 72.5,
+        "option_type": "PUT",
+        "bid": 71.7,
+        "ask": 73.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 6555.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 95.25,
+        "option_type": "PUT",
+        "bid": 94.4,
+        "ask": 96.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6720.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 126.35,
+        "option_type": "PUT",
+        "bid": 125.4,
+        "ask": 127.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 7180.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 91.55,
+        "option_type": "CALL",
+        "bid": 90.6,
+        "ask": 92.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 7385.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 32.4,
+        "option_type": "CALL",
+        "bid": 31.7,
+        "ask": 33.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 7610.0,
+        "maturity": 0.22335153695632748,
+        "market_price": 8.7,
+        "option_type": "CALL",
+        "bid": 8.2,
+        "ask": 9.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 5225.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 19.05,
+        "option_type": "PUT",
+        "bid": 18.5,
+        "ask": 19.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 5860.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 40.400000000000006,
+        "option_type": "PUT",
+        "bid": 39.6,
+        "ask": 41.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 6120.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 58.5,
+        "option_type": "PUT",
+        "bid": 57.8,
+        "ask": 59.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 6380.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 85.2,
+        "option_type": "PUT",
+        "bid": 84.4,
+        "ask": 86.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 6600.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 117.8,
+        "option_type": "PUT",
+        "bid": 116.8,
+        "ask": 118.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6765.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 153.0,
+        "option_type": "PUT",
+        "bid": 151.8,
+        "ask": 154.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 7270.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 80.15,
+        "option_type": "CALL",
+        "bid": 79.3,
+        "ask": 81.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7700.0,
+        "maturity": 0.26367779166910665,
+        "market_price": 9.1,
+        "option_type": "CALL",
+        "bid": 8.6,
+        "ask": 9.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 5825.0,
+        "maturity": 0.3027492035808173,
+        "market_price": 46.2,
+        "option_type": "PUT",
+        "bid": 45.5,
+        "ask": 46.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6575.0,
+        "maturity": 0.3027492035808173,
+        "market_price": 126.7,
+        "option_type": "PUT",
+        "bid": 125.7,
+        "ask": 127.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 7110.0,
+        "maturity": 0.3027492035808173,
+        "market_price": 167.5,
+        "option_type": "CALL",
+        "bid": 166.5,
+        "ask": 168.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 4975.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 23.15,
+        "option_type": "PUT",
+        "bid": 22.6,
+        "ask": 23.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 5750.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 52.65,
+        "option_type": "PUT",
+        "bid": 52.0,
+        "ask": 53.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 6180.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 87.80000000000001,
+        "option_type": "PUT",
+        "bid": 86.9,
+        "ask": 88.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 6440.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 121.9,
+        "option_type": "PUT",
+        "bid": 120.9,
+        "ask": 122.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6700.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 172.1,
+        "option_type": "PUT",
+        "bid": 171.2,
+        "ask": 173.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7230.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 137.9,
+        "option_type": "CALL",
+        "bid": 137.3,
+        "ask": 138.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 7675.0,
+        "maturity": 0.35750621859846754,
+        "market_price": 25.0,
+        "option_type": "CALL",
+        "bid": 24.6,
+        "ask": 25.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 5350.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 37.400000000000006,
+        "option_type": "PUT",
+        "bid": 36.6,
+        "ask": 38.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 6050.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 81.75,
+        "option_type": "PUT",
+        "bid": 81.2,
+        "ask": 82.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 6320.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 113.45,
+        "option_type": "PUT",
+        "bid": 112.5,
+        "ask": 114.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 6535.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 147.65,
+        "option_type": "PUT",
+        "bid": 146.5,
+        "ask": 148.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6705.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 183.0,
+        "option_type": "PUT",
+        "bid": 181.8,
+        "ask": 184.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 7190.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 170.6,
+        "option_type": "CALL",
+        "bid": 169.5,
+        "ask": 171.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 8000.0,
+        "maturity": 0.39036042781624714,
+        "market_price": 8.15,
+        "option_type": "CALL",
+        "bid": 7.8,
+        "ask": 8.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 5525.0,
+        "maturity": 0.4361623869134535,
+        "market_price": 51.8,
+        "option_type": "PUT",
+        "bid": 51.0,
+        "ask": 52.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6175.0,
+        "maturity": 0.4361623869134535,
+        "market_price": 106.45,
+        "option_type": "PUT",
+        "bid": 105.4,
+        "ask": 107.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 6460.0,
+        "maturity": 0.4361623869134535,
+        "market_price": 147.7,
+        "option_type": "PUT",
+        "bid": 146.6,
+        "ask": 148.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6720.0,
+        "maturity": 0.4361623869134535,
+        "market_price": 200.7,
+        "option_type": "PUT",
+        "bid": 199.5,
+        "ask": 201.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 7250.0,
+        "maturity": 0.4361623869134535,
+        "market_price": 165.45,
+        "option_type": "CALL",
+        "bid": 164.3,
+        "ask": 166.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 7800.0,
+        "maturity": 0.4361623869134535,
+        "market_price": 25.55,
+        "option_type": "CALL",
+        "bid": 25.0,
+        "ask": 26.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 5350.0,
+        "maturity": 0.5319871629129592,
+        "market_price": 56.05,
+        "option_type": "PUT",
+        "bid": 55.2,
+        "ask": 56.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6125.0,
+        "maturity": 0.5319871629129592,
+        "market_price": 123.7,
+        "option_type": "PUT",
+        "bid": 122.7,
+        "ask": 124.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 7175.0,
+        "maturity": 0.5319871629129592,
+        "market_price": 247.85,
+        "option_type": "CALL",
+        "bid": 246.5,
+        "ask": 249.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 8000.0,
+        "maturity": 0.5319871629129592,
+        "market_price": 22.85,
+        "option_type": "CALL",
+        "bid": 22.3,
+        "ask": 23.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 5450.0,
+        "maturity": 0.608646984741552,
+        "market_price": 72.2,
+        "option_type": "PUT",
+        "bid": 71.4,
+        "ask": 73.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 6225.0,
+        "maturity": 0.608646984741552,
+        "market_price": 155.2,
+        "option_type": "PUT",
+        "bid": 154.2,
+        "ask": 156.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 7275.0,
+        "maturity": 0.608646984741552,
+        "market_price": 230.75,
+        "option_type": "CALL",
+        "bid": 229.5,
+        "ask": 232.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 8400.0,
+        "maturity": 0.608646984741552,
+        "market_price": 9.9,
+        "option_type": "CALL",
+        "bid": 9.5,
+        "ask": 10.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 5750.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 102.55,
+        "option_type": "PUT",
+        "bid": 101.6,
+        "ask": 103.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 6345.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 183.0,
+        "option_type": "PUT",
+        "bid": 181.9,
+        "ask": 184.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6500.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 212.65,
+        "option_type": "PUT",
+        "bid": 211.4,
+        "ask": 213.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 6655.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 246.95,
+        "option_type": "PUT",
+        "bid": 245.6,
+        "ask": 248.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 7085.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 348.05,
+        "option_type": "CALL",
+        "bid": 346.6,
+        "ask": 349.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 7240.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 262.0,
+        "option_type": "CALL",
+        "bid": 260.7,
+        "ask": 263.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 7650.0,
+        "maturity": 0.6422426949926168,
+        "market_price": 101.9,
+        "option_type": "CALL",
+        "bid": 100.9,
+        "ask": 102.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 5350.0,
+        "maturity": 0.6853068034128387,
+        "market_price": 75.85,
+        "option_type": "PUT",
+        "bid": 74.9,
+        "ask": 76.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 6125.0,
+        "maturity": 0.6853068034128387,
+        "market_price": 157.10000000000002,
+        "option_type": "PUT",
+        "bid": 155.9,
+        "ask": 158.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 7175.0,
+        "maturity": 0.6853068034128387,
+        "market_price": 317.15,
+        "option_type": "CALL",
+        "bid": 315.6,
+        "ask": 318.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 8000.0,
+        "maturity": 0.6853068034128387,
+        "market_price": 46.2,
+        "option_type": "CALL",
+        "bid": 45.4,
+        "ask": 47.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 5400.0,
+        "maturity": 0.7811315803575684,
+        "market_price": 92.6,
+        "option_type": "PUT",
+        "bid": 91.6,
+        "ask": 93.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6175.0,
+        "maturity": 0.7811315803575684,
+        "market_price": 185.7,
+        "option_type": "PUT",
+        "bid": 184.4,
+        "ask": 187.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7225.0,
+        "maturity": 0.7811315803575684,
+        "market_price": 332.20000000000005,
+        "option_type": "CALL",
+        "bid": 330.6,
+        "ask": 333.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 8200.0,
+        "maturity": 0.7811315803575684,
+        "market_price": 39.5,
+        "option_type": "CALL",
+        "bid": 38.7,
+        "ask": 40.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 5450.0,
+        "maturity": 0.8577914016116245,
+        "market_price": 106.25,
+        "option_type": "PUT",
+        "bid": 105.1,
+        "ask": 107.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 6225.0,
+        "maturity": 0.8577914016116245,
+        "market_price": 208.89999999999998,
+        "option_type": "PUT",
+        "bid": 207.6,
+        "ask": 210.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 7275.0,
+        "maturity": 0.8577914016116245,
+        "market_price": 335.85,
+        "option_type": "CALL",
+        "bid": 334.3,
+        "ask": 337.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 8200.0,
+        "maturity": 0.8577914016116245,
+        "market_price": 51.0,
+        "option_type": "CALL",
+        "bid": 50.2,
+        "ask": 51.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5760.0,
+        "maturity": 0.894124962516351,
+        "market_price": 146.9,
+        "option_type": "PUT",
+        "bid": 146.5,
+        "ask": 147.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 6105.0,
+        "maturity": 0.894124962516351,
+        "market_price": 193.85,
+        "option_type": "PUT",
+        "bid": 192.6,
+        "ask": 195.1,
+        "spread": 0.0
+    },
+    {
+        "strike": 6390.0,
+        "maturity": 0.894124962516351,
+        "market_price": 248.14999999999998,
+        "option_type": "PUT",
+        "bid": 247.7,
+        "ask": 248.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6610.0,
+        "maturity": 0.894124962516351,
+        "market_price": 295.70000000000005,
+        "option_type": "PUT",
+        "bid": 294.1,
+        "ask": 297.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 7105.0,
+        "maturity": 0.894124962516351,
+        "market_price": 444.95,
+        "option_type": "CALL",
+        "bid": 443.2,
+        "ask": 446.7,
+        "spread": 0.0
+    },
+    {
+        "strike": 7285.0,
+        "maturity": 0.894124962516351,
+        "market_price": 355.25,
+        "option_type": "CALL",
+        "bid": 354.5,
+        "ask": 356.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 7530.0,
+        "maturity": 0.894124962516351,
+        "market_price": 227.7,
+        "option_type": "CALL",
+        "bid": 226.2,
+        "ask": 229.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 7880.0,
+        "maturity": 0.894124962516351,
+        "market_price": 113.7,
+        "option_type": "CALL",
+        "bid": 112.4,
+        "ask": 115.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 8180.0,
+        "maturity": 0.894124962516351,
+        "market_price": 58.599999999999994,
+        "option_type": "CALL",
+        "bid": 57.4,
+        "ask": 59.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 5300.0,
+        "maturity": 0.9344512207879877,
+        "market_price": 100.8,
+        "option_type": "PUT",
+        "bid": 98.0,
+        "ask": 103.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 6075.0,
+        "maturity": 0.9344512207879877,
+        "market_price": 194.55,
+        "option_type": "PUT",
+        "bid": 191.3,
+        "ask": 197.8,
+        "spread": 0.0
+    },
+    {
+        "strike": 7125.0,
+        "maturity": 0.9344512207879877,
+        "market_price": 451.20000000000005,
+        "option_type": "CALL",
+        "bid": 446.8,
+        "ask": 455.6,
+        "spread": 0.0
+    },
+    {
+        "strike": 7900.0,
+        "maturity": 0.9344512207879877,
+        "market_price": 119.9,
+        "option_type": "CALL",
+        "bid": 116.5,
+        "ask": 123.3,
+        "spread": 0.0
+    },
+    {
+        "strike": 5450.0,
+        "maturity": 1.0302759954747827,
+        "market_price": 126.4,
+        "option_type": "PUT",
+        "bid": 123.3,
+        "ask": 129.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 6600.0,
+        "maturity": 1.0302759954747827,
+        "market_price": 318.65,
+        "option_type": "PUT",
+        "bid": 314.8,
+        "ask": 322.5,
+        "spread": 0.0
+    },
+    {
+        "strike": 8050.0,
+        "maturity": 1.0302759954747827,
+        "market_price": 107.9,
+        "option_type": "CALL",
+        "bid": 104.4,
+        "ask": 111.4,
+        "spread": 0.0
+    },
+    {
+        "strike": 5450.0,
+        "maturity": 1.1069358169749917,
+        "market_price": 136.25,
+        "option_type": "PUT",
+        "bid": 133.5,
+        "ask": 139.0,
+        "spread": 0.0
+    },
+    {
+        "strike": 6275.0,
+        "maturity": 1.1069358169749917,
+        "market_price": 261.65,
+        "option_type": "PUT",
+        "bid": 258.4,
+        "ask": 264.9,
+        "spread": 0.0
+    },
+    {
+        "strike": 7325.0,
+        "maturity": 1.1069358169749917,
+        "market_price": 403.1,
+        "option_type": "CALL",
+        "bid": 399.0,
+        "ask": 407.2,
+        "spread": 0.0
+    },
+    {
+        "strike": 9000.0,
+        "maturity": 1.1069358169749917,
+        "market_price": 20.5,
+        "option_type": "CALL",
+        "bid": 18.8,
+        "ask": 22.2,
+        "spread": 0.0
+    }
+]

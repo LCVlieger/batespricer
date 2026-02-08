@@ -45,8 +45,15 @@ def visualize_price_surface_final(csv_file):
     #plt.style.use('default')
     fig = plt.figure(figsize=(14, 10))
     ax = fig.add_subplot(111, projection='3d')
+    ax.computed_zorder = False
     #ax.set_facecolor('white')
-
+    ax.scatter(
+        df['Moneyness'], df['T'], df['Market'], 
+        color='r', 
+        s=13, 
+        label='Market Price', 
+        depthshade=False, zorder=1
+    )
     # --- Layer A: Triangular Surface ---
     surf = ax.plot_trisurf(
         df['Moneyness'], df['T'], df['Model'], 
@@ -54,7 +61,7 @@ def visualize_price_surface_final(csv_file):
         alpha=0.6, 
         edgecolor='none', 
         linewidth=0, 
-        antialiased=True,
+        antialiased=True, zorder=3
     )
     
     # --- Layer B: Market Dots ---
@@ -66,17 +73,11 @@ def visualize_price_surface_final(csv_file):
     #    depthshade=False,
     #    label='Market Price' # Label for legend
     #)
-    ax.scatter(
-        df['Moneyness'], df['T'], df['Market'], 
-        color='r', 
-        s=13, 
-        label='Market Price', 
-        depthshade=False
-    )
+    
 
     # --- Layer C: Needles ---
     for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market'], df['Model']):
-        ax.plot([x, x], [y, y], [z_mkt, z_mod], color='black', alpha=0.3, linewidth=0.8)
+        ax.plot([x, x], [y, y], [z_mkt, z_mod], color='black', alpha=0.3, linewidth=0.8,zorder=2)
 
     # 3. LEGEND (Exact Positioning from Inspiration)
     # bbox_to_anchor=(0.157, 0.797)
@@ -100,7 +101,7 @@ def visualize_price_surface_final(csv_file):
     sigma_j = params.get('sigma_j', 0.0)
 
     # Main Title (Coordinate: 0.535, 0.84)
-    text_obj = fig.text(0.5897125, 0.843, f"Bates Calibration Price Surface: AAPL", 
+    text_obj = fig.text(0.5897125, 0.843, f"Bates Calibration Price Surface: ^SPX", 
              fontsize=18, fontweight='bold', family='monospace', ha='center', color='black')
     text_obj.set_path_effects([
     path_effects.withStroke(linewidth=0.5, foreground='black')
@@ -108,7 +109,7 @@ def visualize_price_surface_final(csv_file):
     # Subtitle (Two lines to fit all parameters + S0)
     # Coordinate: 0.535, 0.79
     subtitle = (rf"$\kappa={kappa:.2f}, \theta={theta:.2f}, \xi={xi:.2f}, \rho={rho:.2f}, v_0={v0:.3f}$" + "\n" +
-                rf"$\lambda={lamb:.2f}, \mu_J={mu_j:.2f}, \sigma_J={sigma_j:.2f}, S_0={s0:.1f}$")
+                rf"$\lambda={lamb:.2f}, \mu_J={mu_j:.2f}, \sigma_J={sigma_j:.2f}, S_0={s0:.2f}$")
     
     fig.text(0.581575, 0.7989, subtitle, fontsize=10, family='monospace', ha='center', color='#555555')
 
@@ -165,7 +166,7 @@ files = glob.glob("results/calibration_*_prices.csv")
 if files:
     # Pick the latest file
     files_sorted = sorted(files, key=os.path.getctime, reverse=True)
-    latest_file = files_sorted[1]#max(files, key=os.path.getctime)
+    latest_file = files_sorted[0]#max(files, key=os.path.getctime)
     visualize_price_surface_final(latest_file)
 else:
     print("No calibration files found.")

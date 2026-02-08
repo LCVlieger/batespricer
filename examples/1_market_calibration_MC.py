@@ -5,15 +5,36 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from scipy.optimize import minimize
+from scipy.interpolate import interp1d
 from heston_pricer.calibration import BatesCalibratorMC 
 from heston_pricer.analytics import implied_volatility
-from heston_pricer.data import (
-    fetch_treasury_rates_fred, 
-    fetch_raw_data, 
-    fetch_options, 
-    get_market_implied_spot, 
-    ImpliedDividendCurve
-)
+
+# =================================================================
+# HELPER CLASSES (To mimic objects from data fetchers)
+# =================================================================
+class InterpolatedCurve:
+    """Reconstructs a curve from the JSON samples."""
+    def __init__(self, curve_dict):
+        # Parse keys like "0.0200Y" -> 0.02
+        times = sorted([float(k.replace('Y', '')) for k in curve_dict.keys()])
+        rates = [curve_dict[f"{t:.4f}Y"] for t in times]
+        # Linear interpolation with flat extrapolation
+        self.interp = interp1d(times, rates, kind='linear', fill_value=(rates[0], rates[-1]), bounds_error=False)
+
+    def get_rate(self, T):
+        return float(self.interp(T))
+
+class SimpleOption:
+    """Structure to hold option data compatible with BatesCalibratorMC"""
+    def __init__(self, T, K, type_str, price, spread):
+        self.maturity = T
+        self.strike = K
+        self.option_type = type_str
+        self.market_price = price
+        # Reconstruct Ask/Bid so the MC engine calculates the same weights (1/spread)
+        half_spread = spread / 2.0
+        self.ask = price + half_spread
+        self.bid = price - half_spread
 
 # =================================================================
 # 3. SAVING & VALIDATION (Synchronized with Analytical)
@@ -126,22 +147,41 @@ def print_curves(r_curve, q_curve):
 # 4. MAIN EXECUTION
 # =================================================================
 def main():
-    FRED_API_KEY = os.getenv("FRED_API_KEY")
-    target_date = datetime.now().strftime("%Y-%m-%d")
-    ticker = "SPY" 
+    # --- FILE CONFIGURATION ---
+    # We use the SPX files you uploaded
+    json_path = "calibration_Analytic_^SPX_20260208_022951_meta.json"
+    csv_path  = "calibration_Analytic_^SPX_20260208_022951_prices.csv"
+    ticker = "^SPX" 
     
-    print(f"Initializing Bates MC Calibration for {ticker}...")
+    print(f"Initializing Bates MC Calibration for {ticker} using LOCAL FILES...")
     
-    # 1. Data Fetching
-    r_curve = fetch_treasury_rates_fred(target_date, FRED_API_KEY)
-    raw_df = fetch_raw_data(ticker)
-    S0_actual = get_market_implied_spot(ticker, raw_df, r_curve)
+    # --- 1. Data Loading (Replaced Fetching) ---
+    with open(json_path, 'r') as f:
+        meta_data = json.load(f)
+
+    # Reconstruct Market Data
+    S0_actual = meta_data['market']['S0']
+    r_curve = InterpolatedCurve(meta_data['market']['r_sample'])
+    q_curve = InterpolatedCurve(meta_data['market']['q_sample'])
+    
     print(f"Market-Consistent Spot: {S0_actual:.2f}")
-    q_curve = ImpliedDividendCurve(raw_df, S0_actual, r_curve, ticker)
     print_curves(r_curve, q_curve)
     
-    # Load Options
-    options_processed = fetch_options(ticker, S0_actual, target_size=150) # Reduced size for speed
+    # Load Options from CSV
+    df_prices = pd.read_csv(csv_path)
+    options_processed = []
+    
+    # Convert CSV rows to objects expected by MC Calibrator
+    for _, row in df_prices.iterrows():
+        opt = SimpleOption(
+            T=row['T'],
+            K=row['K'],
+            type_str=row['Type'],
+            price=row['Market'],
+            spread=row['Spread']
+        )
+        options_processed.append(opt)
+
     print(f"Processing {len(options_processed)} options for MC Calibration...")
     
     # 2. Setup MC Calibrator

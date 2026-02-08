@@ -110,7 +110,7 @@ class BatesCalibrator:
                 spreads2 = np.array([max(abs(o.ask - o.bid), 0.01) for o in options])
                 # We combine spread weights (trustworthiness) with Vega weights (importance)
                 lambda_floor = 0.05 * np.mean(list(atm_vega_map.values()))
-                weighted_diff = raw_diff / (raw_diff * spread_weights) #weighted_diff = raw_diff / (vegas + lambda_floor) #+ spreads2)#(raw_diff * spread_weights) ## raw_diff / (vegas + 1e-4)) * spread_weights
+                weighted_diff = (raw_diff * spread_weights) #weighted_diff = raw_diff / (vegas + lambda_floor) #+ spreads2)#(raw_diff * spread_weights) ## raw_diff / (vegas + 1e-4)) * spread_weights
                 
                 return np.sqrt(np.mean(weighted_diff**2)) 
             except: 
