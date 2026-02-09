@@ -259,47 +259,44 @@ class BatesCalibratorMC:
             kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = params
             
             # 1. Generate Paths (Risk Neutral, r=0, q=0)
+            # Result shape: [n_paths, n_steps + 1]
             paths = generate_bates_paths_crn(
                 self.S0, 0.0, 0.0, v0, kappa, theta, xi, rho, 
                 lamb, mu_j, sigma_j,
                 self.T_max, self.n_paths, self.min_n_steps, self.z_noise
             )
             avg_terminal = np.mean(paths[:, -1])
+
             ratio = avg_terminal / self.S0
-            #print(f"before correction + {ratio:.5f}")
+            if abs(ratio - 1.0) > 0.01: print(f"Error: {ratio}")
             # =======================================================
-            # MARTINGALE CORRECTION (CONTROL VARIATE)
+            # VECTORIZED MARTINGALE CORRECTION
             # =======================================================
-            # The empirical mean of the paths will deviate from S0 due to:
-            # 1. Discretization bias (Euler scheme on Heston)
-            # 2. Poisson sampling noise (Finite number of jumps)
-            # We MUST correct this, otherwise the optimizer fights the drift error.
+            # Instead of checking just the last step, we check the average
+            # of the paths at EVERY time step (axis=0).
+            # This creates a vector of averages with shape (n_steps + 1,)
+            avg_paths = np.mean(paths, axis=0)
             
-            avg_terminal = np.mean(paths[:, -1])
+            # Calculate a correction factor for every single time step.
+            # This forces the mean at t=1, t=50, t=100... all to equal S0 exactly.
+            # We avoid division by zero by replacing 0s (unlikely) with 1s if needed, 
+            # though standard paths shouldn't hit 0 mean.
+            corrections = self.S0 / avg_paths
+            # Apply correction via Broadcasting.
+            # Numpy matches the last dimension: 
+            # (n_paths, n_steps+1) * (n_steps+1,) -> Scales each column correctly.
+            paths *= corrections
             
-            # The Correction Factor
-            # If avg > S0, we scale down. If avg < S0, we scale up.
-            martingale_correction = self.S0 / avg_terminal
-            
-            # Apply correction to all paths (Broadcasting)
-            # We scale the entire path or just the terminal. 
-            # For Path-Dependent options, scale whole path. For Euclidean, just terminal is enough.
-            # Here we scale the whole path matrix to be safe.
-            ####paths *= martingale_correction
-            
-            # DEBUG: Check ratio after correction (Should be exactly 1.0)
-            # ratio = np.mean(paths[:, -1]) / self.S0
-            # if abs(ratio - 1.0) > 1e-9: print(f"Error: {ratio}")
+            # DEBUG: Verify the correction works (Optional)
+            # new_avgs = np.mean(paths, axis=0)
+            # if np.max(np.abs(new_avgs - self.S0)) > 1e-9:
+            #    print("Drift correction failed!")
             # =======================================================
-            avg_terminal = np.mean(paths[:, -1])
-            ratio = avg_terminal / self.S0
-            #print(f"after correction + {ratio:.5f}")
-            #print(ratio)
-            # Only print if we are significantly off (e.g., > 1% error)
-            if abs(ratio - 1.0) > 0.01:
-                print(f"CRITICAL DRIFT ERROR: Ratio={ratio:.4f} | S0={self.S0:.2f} Avg_Sim={avg_terminal:.2f}")
-                print(f"Params -> Lamb: {lamb:.4f}, Mu_J: {mu_j:.4f}, Xi: {xi:.4f}")
+            
+            #print(f" correction + {ratio:.5f}")
             # 3. Pricing Engine
+            # Now pass the corrected paths. Since we forced the mean to S0,
+            # the drift_corr parameter in the engine stays 0.0.
             model_prices = _numba_price_engine(
                 paths, self.f_time_idxs, self.f_strikes, self.f_is_call, 
                 self.f_rates, self.f_qs, 0.0, self.f_maturities
@@ -307,5 +304,5 @@ class BatesCalibratorMC:
             
             return model_prices, self.f_market_prices, self.f_weights
 
-    
-            
+        
+                

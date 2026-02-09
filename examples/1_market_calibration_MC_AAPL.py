@@ -190,7 +190,7 @@ def main():
     print(f"Processing {len(options_processed)} options for MC Calibration...")
     
     # 2. Setup MC Calibrator
-    mc_calib = BatesCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=10000, n_steps=10000)  #5000 4000
+    mc_calib = BatesCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=5000, n_steps=5000)  #5000 4000
     mc_calib._precompute(options_processed)
     
     # 3. Optimization Setup
@@ -211,7 +211,7 @@ def main():
             (0.01, 1),   # xi (Vol of Vol - allow high values for steep smile)
             (-0.99, 0.0), # rho (Correlation - Locked negative for Equity Skew)
             (0.001, 0.5),  # v0 (Initial variance)
-            (0.0, 1.0),    # lamb (Jump intensity)
+            (0.0, 0.5),    # lamb (Jump intensity)
             (-0.3, 0.0),   # mu_j (Mean jump size)
             (0.05, 0.3)    # sigma_j (Jump volatility)
         ]
@@ -232,7 +232,7 @@ def main():
               f"v0:{xk[4]:.4f} th:{xk[1]:.4f} ka:{xk[0]:.3f} xi:{xk[2]:.3f} rho:{xk[3]:.2f} | lam:{xk[5]:1.3f}  mu_j:{xk[6]:1.3f}  sig_j:{xk[7]:1.3f}")
         
     t0 = time.time()
-    res = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, tol=1e-8, options={'maxiter': 500, 'eps': 1e-2}) #was -2
+    res = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, tol=1e-8, options={'maxiter': 500, 'eps': 7e-3}) #was -2
     
     print(f"CALIBRATION DONE (Time: {time.time()-t0:.2f}s)")
     
