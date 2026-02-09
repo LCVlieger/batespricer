@@ -228,37 +228,33 @@ class BatesCalibratorMC:
         self.f_time_idxs = np.array([max(1, min(int(round(o.maturity / self.dt)), self.min_n_steps)) 
                                     for o in options], dtype=np.int32)
 
-        # 4. Antithetic Noise Generation (CRITICAL FIX)
+        # 4. Antithetic Noise Generation (CORRECTED)
         if (self.z_noise is None or self.z_noise.shape[1] != self.min_n_steps or self.z_noise.shape[2] != self.n_paths):
             rng = np.random.default_rng(42)
             half_paths = self.n_paths // 2
             
-            # Generate half the noise
-            # Shape: (4, Steps, Half_Paths)
-            z_half = np.zeros((4, self.min_n_steps, half_paths))
-            
-            # Standard Normals for Asset(0), Vol(1), JumpSize(3)
-            z_half[0] = rng.standard_normal((self.min_n_steps, half_paths))
-            z_half[1] = rng.standard_normal((self.min_n_steps, half_paths))
-            z_half[3] = rng.standard_normal((self.min_n_steps, half_paths))
-            
-            # Uniforms for Poisson Jump Frequency(2)
-            z_half[2] = rng.random((self.min_n_steps, half_paths))
-            
-            # Create Full Noise Matrix with Antithetic properties
+            # Create Full Noise Matrix
             self.z_noise = np.zeros((4, self.min_n_steps, self.n_paths))
             
-            # Fill first half
-            self.z_noise[:, :, :half_paths] = z_half
+            # --- Generate First Half ---
+            z_half_1 = rng.standard_normal((3, self.min_n_steps, half_paths)) # Rows 0 (Asset), 1 (Vol), 3 (JumpSize)
+            u_half_1 = rng.random((self.min_n_steps, half_paths))             # Row 2 (Poisson Trigger)
             
-            # Fill second half (Antithetic)
-            # Flip signs for Brownian motions
-            self.z_noise[0, :, half_paths:] = -z_half[0]
-            self.z_noise[1, :, half_paths:] = -z_half[1]
-            self.z_noise[3, :, half_paths:] = -z_half[3]
+            self.z_noise[0, :, :half_paths] = z_half_1[0]
+            self.z_noise[1, :, :half_paths] = z_half_1[1]
+            self.z_noise[3, :, :half_paths] = z_half_1[2]
+            self.z_noise[2, :, :half_paths] = u_half_1
+
+            # --- Generate Second Half (Antithetic Mixed) ---
             
-            # For Uniforms, use (1.0 - U) to preserve distribution uniformity
-            self.z_noise[2, :, half_paths:] = 1.0 - z_half[2]
+            # 1. Brownian Motions: Use Antithetic (Invert Signs) -> Reduces Variance
+            self.z_noise[0, :, half_paths:] = -z_half_1[0]
+            self.z_noise[1, :, half_paths:] = -z_half_1[1]
+            self.z_noise[3, :, half_paths:] = -z_half_1[2] # Jump Size is Normal, so we can invert this too
+            
+            # 2. Poisson Triggers: INDEPENDENT -> Preserves Jump Statistics
+            # DO NOT use (1-U) here. Generate fresh randoms.
+            self.z_noise[2, :, half_paths:] = rng.random((self.min_n_steps, half_paths))
     def get_prices(self, params):
             kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = params
             

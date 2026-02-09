@@ -190,7 +190,7 @@ def main():
     print(f"Processing {len(options_processed)} options for MC Calibration...")
     
     # 2. Setup MC Calibrator
-    mc_calib = BatesCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=10000, n_steps=4000)  #5000 4000
+    mc_calib = BatesCalibratorMC(S0=S0_actual, r_curve=r_curve, q_curve=q_curve, n_paths=10000, n_steps=10000)  #5000 4000
     mc_calib._precompute(options_processed)
     
     # 3. Optimization Setup
