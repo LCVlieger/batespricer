@@ -207,35 +207,58 @@ class BatesCalibratorMC:
         self.T_max = max(o.maturity for o in options)
         self.dt = self.T_max / self.min_n_steps
         
-        # 2. Weights Logic
+        # Ensure even number of paths for Antithetic Variates
+        if self.n_paths % 2 != 0:
+            self.n_paths += 1
+            
+        # 2. Weights Logic (Unchanged)
         spreads = np.array([max(abs(o.ask - o.bid), 0.01) for o in options])
         raw_weights = 1.0 / spreads
         cap_val = np.mean(raw_weights) + sigma_cap * np.std(raw_weights)
         all_weights = np.clip(raw_weights, None, cap_val)
         
-        # 3. Flatten all data into aligned Numpy arrays
-        # This replaces the need for maturity_map and dictionary lookups in get_prices
+        # 3. Flatten Arrays (Unchanged)
         self.f_strikes = np.array([o.strike for o in options], dtype=np.float64)
         self.f_is_call = np.array([o.option_type.upper() == 'CALL' for o in options], dtype=np.bool_)
         self.f_maturities = np.array([o.maturity for o in options], dtype=np.float64)
         self.f_market_prices = np.array([o.market_price for o in options], dtype=np.float64)
         self.f_weights = all_weights.astype(np.float64)
-        
-        # Pre-lookup rates and time indices (crucial speedup)
         self.f_rates = np.array([self.r_curve.get_rate(o.maturity) for o in options])
         self.f_qs = np.array([self.q_curve.get_rate(o.maturity) for o in options])
         self.f_time_idxs = np.array([max(1, min(int(round(o.maturity / self.dt)), self.min_n_steps)) 
                                     for o in options], dtype=np.int32)
 
-        # 4. Noise Generation (Stay as is)
+        # 4. Antithetic Noise Generation (CRITICAL FIX)
         if (self.z_noise is None or self.z_noise.shape[1] != self.min_n_steps or self.z_noise.shape[2] != self.n_paths):
             rng = np.random.default_rng(42)
-            # Shapes updated to match your generator: (4, n_steps, n_paths)
+            half_paths = self.n_paths // 2
+            
+            # Generate half the noise
+            # Shape: (4, Steps, Half_Paths)
+            z_half = np.zeros((4, self.min_n_steps, half_paths))
+            
+            # Standard Normals for Asset(0), Vol(1), JumpSize(3)
+            z_half[0] = rng.standard_normal((self.min_n_steps, half_paths))
+            z_half[1] = rng.standard_normal((self.min_n_steps, half_paths))
+            z_half[3] = rng.standard_normal((self.min_n_steps, half_paths))
+            
+            # Uniforms for Poisson Jump Frequency(2)
+            z_half[2] = rng.random((self.min_n_steps, half_paths))
+            
+            # Create Full Noise Matrix with Antithetic properties
             self.z_noise = np.zeros((4, self.min_n_steps, self.n_paths))
-            self.z_noise[0] = rng.standard_normal((self.min_n_steps, self.n_paths))
-            self.z_noise[1] = rng.standard_normal((self.min_n_steps, self.n_paths))
-            self.z_noise[2] = rng.random((self.min_n_steps, self.n_paths))
-            self.z_noise[3] = rng.standard_normal((self.min_n_steps, self.n_paths))
+            
+            # Fill first half
+            self.z_noise[:, :, :half_paths] = z_half
+            
+            # Fill second half (Antithetic)
+            # Flip signs for Brownian motions
+            self.z_noise[0, :, half_paths:] = -z_half[0]
+            self.z_noise[1, :, half_paths:] = -z_half[1]
+            self.z_noise[3, :, half_paths:] = -z_half[3]
+            
+            # For Uniforms, use (1.0 - U) to preserve distribution uniformity
+            self.z_noise[2, :, half_paths:] = 1.0 - z_half[2]
     def get_prices(self, params):
             kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = params
             
@@ -245,23 +268,41 @@ class BatesCalibratorMC:
                 lamb, mu_j, sigma_j,
                 self.T_max, self.n_paths, self.min_n_steps, self.z_noise
             )
-
-            # =======================================================
-            # DEBUGGING: CHECK MARTINGALE PROPERTY
-            # =======================================================
-            # The mean of the final paths SHOULD be S0 (approx).
-            # If Ratio is 0.90, you have a 10% downward drift error.
-            # If Ratio is 1.10, you have a 10% upward drift error.
-            
             avg_terminal = np.mean(paths[:, -1])
             ratio = avg_terminal / self.S0
-            print(ratio)
+            #print(f"before correction + {ratio:.5f}")
+            # =======================================================
+            # MARTINGALE CORRECTION (CONTROL VARIATE)
+            # =======================================================
+            # The empirical mean of the paths will deviate from S0 due to:
+            # 1. Discretization bias (Euler scheme on Heston)
+            # 2. Poisson sampling noise (Finite number of jumps)
+            # We MUST correct this, otherwise the optimizer fights the drift error.
+            
+            avg_terminal = np.mean(paths[:, -1])
+            
+            # The Correction Factor
+            # If avg > S0, we scale down. If avg < S0, we scale up.
+            martingale_correction = self.S0 / avg_terminal
+            
+            # Apply correction to all paths (Broadcasting)
+            # We scale the entire path or just the terminal. 
+            # For Path-Dependent options, scale whole path. For Euclidean, just terminal is enough.
+            # Here we scale the whole path matrix to be safe.
+            ####paths *= martingale_correction
+            
+            # DEBUG: Check ratio after correction (Should be exactly 1.0)
+            # ratio = np.mean(paths[:, -1]) / self.S0
+            # if abs(ratio - 1.0) > 1e-9: print(f"Error: {ratio}")
+            # =======================================================
+            avg_terminal = np.mean(paths[:, -1])
+            ratio = avg_terminal / self.S0
+            #print(f"after correction + {ratio:.5f}")
+            #print(ratio)
             # Only print if we are significantly off (e.g., > 1% error)
             if abs(ratio - 1.0) > 0.01:
                 print(f"CRITICAL DRIFT ERROR: Ratio={ratio:.4f} | S0={self.S0:.2f} Avg_Sim={avg_terminal:.2f}")
                 print(f"Params -> Lamb: {lamb:.4f}, Mu_J: {mu_j:.4f}, Xi: {xi:.4f}")
-            # =======================================================
-
             # 3. Pricing Engine
             model_prices = _numba_price_engine(
                 paths, self.f_time_idxs, self.f_strikes, self.f_is_call, 
@@ -269,3 +310,6 @@ class BatesCalibratorMC:
             )
             
             return model_prices, self.f_market_prices, self.f_weights
+
+    
+            

@@ -155,9 +155,9 @@ def print_curves(r_curve, q_curve):
 def main():
     # --- FILE CONFIGURATION ---
     # Filenames updated to match your uploaded files
-    json_path = "results/calibration_Analytic_AAPL_20260208_020354_meta.json" #"results/calibration_Analytic_AAPL_20260208_020354_meta.json"
-    csv_path  = "results/calibration_Analytic_AAPL_20260208_020354_prices.csv" #"results/calibration_Analytic_^SPX_20260208_022951_meta.json"
-    ticker = "AAPL" 
+    json_path = "results/calibration_Analytic_^SPX_20260208_022951_meta.json" #"results/calibration_Analytic_AAPL_20260208_020354_meta.json"
+    csv_path  = "results/calibration_Analytic_^SPX_20260208_022951_prices.csv" #"results/calibration_Analytic_^SPX_20260208_022951_meta.json"
+    ticker = "SPX" 
     
     print(f"Initializing Bates MC Calibration for {ticker} using LOCAL FILES...")
     
@@ -208,7 +208,7 @@ def main():
     bounds = [
             (1.0, 5.0),   # kappa (Speed of mean reversion)
             (0.001, 0.5),  # theta (Long run variance)
-            (0.01, 1.5),   # xi (Vol of Vol - allow high values for steep smile)
+            (0.01, 1),   # xi (Vol of Vol - allow high values for steep smile)
             (-0.99, 0.0), # rho (Correlation - Locked negative for Equity Skew)
             (0.001, 0.5),  # v0 (Initial variance)
             (0.0, 1.0),    # lamb (Jump intensity)
@@ -232,7 +232,7 @@ def main():
               f"v0:{xk[4]:.4f} th:{xk[1]:.4f} ka:{xk[0]:.3f} xi:{xk[2]:.3f} rho:{xk[3]:.2f} | lam:{xk[5]:1.3f}  mu_j:{xk[6]:1.3f}  sig_j:{xk[7]:1.3f}")
         
     t0 = time.time()
-    res = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, tol=1e-8, options={'maxiter': 500, 'eps': 1e-1}) #was -2
+    res = minimize(objective, x0, method='SLSQP', bounds=bounds, callback=callback, tol=1e-8, options={'maxiter': 500, 'eps': 1e-2}) #was -2
     
     print(f"CALIBRATION DONE (Time: {time.time()-t0:.2f}s)")
     
