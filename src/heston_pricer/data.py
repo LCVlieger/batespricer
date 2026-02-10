@@ -111,8 +111,6 @@ def calculate_spx_time_to_maturity(expiry_date: datetime, ticker_symbol: str) ->
 
 # --- PART 3: DIVIDEND ENGINE ---
 
-# --- PART 3: DIVIDEND ENGINE (HYBRID) ---
-
 class ImpliedDividendCurve:
     def __init__(self, df: pd.DataFrame, S0_anchor: float, r_curve, ticker_symbol: str = ""):
         self.yields = {}
