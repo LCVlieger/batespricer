@@ -60,12 +60,12 @@ def visualize_price_surface_final(csv_file):
     # --- DOT STYLING (Inspired by your IV plot) ---
     # We use a pure red, but with a subtle gray/transparent edge
     # to soften the harshness of the point on the light background
-    stale_red = "#7E1F1F" #"#BC0000"
+    stale_red = "#9E0000" #"#BC0000"
     dot_color = stale_red
     dot_size = 39  # Adjusted for side-by-side legibility
-    edge_col = (0.3, 0.02, 0.02, 0.03) # Very subtle gray transparent border
+    edge_col = 'none'#(0.52, 0.02, 0.02, 0.03) # Very subtle gray transparent border
     edge_width = 0.01
-    dot_alpha = 0.6
+    dot_alpha = 0.7
     for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market_Rel'], df['Model_Rel']):
         z_ord = 10 if z_mkt >= z_mod else 1
         ax.plot([x, x], [y, y], [z_mkt, z_mod], linestyle="-", color=stale_red, alpha=dot_alpha, linewidth=0.8, zorder=z_ord)
@@ -149,9 +149,9 @@ def visualize_price_surface_final(csv_file):
             lbl = "Market Price" if df_safe.empty else ""
             ax.scatter(
                 df_exposed['Moneyness'], df_exposed['T'], df_exposed['Market_Rel'], 
-                color="#bf0000d3", s=dot_size, label=lbl, 
+                color="#b20d0dd2", s=dot_size, label=lbl, #"#bf0000d3"
                 depthshade=False, zorder=2,    
-                edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
+                edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha+0.1
             )
     # --- 2B. Model Surface (zorder=3) ---
     # Use the SAME triangulation to ensure visual match
@@ -199,10 +199,10 @@ def visualize_price_surface_final(csv_file):
     ax.dist = 11
     ax.set_xlabel('Moneyness ($K/S_0$)', labelpad=5, fontsize=11)
     ax.set_ylabel('Maturity ($T$ Years)', labelpad=5, fontsize=11)
-    ax.set_zlabel('Relative Price ($C/S_0$)', labelpad=5, fontsize=11)
+    ax.set_zlabel('Relative Price ($C/S_0$)', labelpad=6.75, fontsize=11)
 
     for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
-        axis._axinfo["grid"].update({'linewidth': 0.575, 'alpha': 1})
+        axis._axinfo["grid"].update({'linewidth': 0.575, 'alpha': 1, 'color': (0.68, 0.68, 0.68, 0.5),})
         axis.set_pane_color((0.95, 0.95, 0.95, 1.0))
         for label in axis.get_ticklabels():
             label.set_fontsize(11)
