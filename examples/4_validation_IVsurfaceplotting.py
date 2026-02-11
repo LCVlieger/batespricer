@@ -284,7 +284,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         if market_options and valid_needles > 0:
             ax.legend(loc='upper left', bbox_to_anchor=(0.157, 0.797), frameon=False, labelcolor="#D7D7D7", fontsize=10)
 
-        cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=15, pad=0.01)
+        cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=15, pad=0.001, alpha=0.8)
         cbar.ax.yaxis.set_tick_params(color='white', labelcolor='white')
         cbar.outline.set_visible(False)
 

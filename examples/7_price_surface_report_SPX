@@ -4,124 +4,225 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
+import matplotlib.colors as mcolors
+from matplotlib.ticker import FixedLocator
 import glob
+import matplotlib.tri as mtri
+from scipy.spatial import ConvexHull
+from scipy.spatial import Delaunay
+from scipy.spatial import cKDTree
+from scipy.interpolate import LinearNDInterpolator
+import matplotlib.tri as mtri
 import os
 
+# --- GAMMA COLORMAP FUNCTION ---
+def create_gamma_cmap(base_cmap_name, gamma=0.5):
+    base = cm.get_cmap(base_cmap_name)
+    N = 256
+    values = np.linspace(0, 1.0, N)
+    warped_values = values ** gamma 
+    colors = base(warped_values)
+    return mcolors.ListedColormap(colors, name=f'Warped_{base_cmap_name}')
+
 def visualize_price_surface_final(csv_file):
-    """
-    Final Polish: Light-colored Triangular Surface, no titles,
-    larger market points for side-by-side readability, and PDF export.
-    """
-    print(f"Generating Final Polished Plot from {csv_file}...")
+    print(f"Generating Final High-Precision Plot from {csv_file}...")
     df = pd.read_csv(csv_file)
     
-    # 1. Load Metadata
+    # 1. Load Metadata for S0
     base_name = csv_file.replace("_prices.csv", "")
     json_file = f"{base_name}_meta.json"
-    
-    # Default values
     s0 = df['K'].median()
-    
     try:
         with open(json_file, 'r') as f:
             meta = json.load(f)
             s0 = meta['market']['S0']
-    except Exception:
-        pass
+    except Exception: pass
 
+    # --- NORMALIZATION ---
     df['Moneyness'] = df['K'] / s0
+    df['Market_Rel'] = df['Market'] / s0
+    df['Model_Rel'] = df['Model'] / s0
 
-    # 2. Setup Plot (Original White Background)
+    # --- FIXED SCALE & GAMMA POP ---
+    vmin, vmax = 0.0, 0.11
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    my_cmap = create_gamma_cmap('viridis', gamma=0.5) 
+
+    # 2. Setup Plot
     fig = plt.figure(figsize=(10, 7))
     ax = fig.add_subplot(111, projection='3d')
     ax.computed_zorder = False
     
-    # --- Increased point size (s=35) for better visibility in small layouts ---
-    ax.scatter(
-        df['Moneyness'], df['T'], df['Market'], 
-        color='r', 
-        s=25,  
-        label='Market Price', 
-        depthshade=False, zorder=1
-    )
+    # --- SPLIT DATA FOR DYNAMIC Z-ORDERING ---
+    df_above = df[df['Market_Rel'] >= df['Model_Rel']]
+    df_below = df[df['Market_Rel'] < df['Model_Rel']]
+
+    # --- DOT STYLING (Inspired by your IV plot) ---
+    # We use a pure red, but with a subtle gray/transparent edge
+    # to soften the harshness of the point on the light background
+    stale_red = "#970000" 
+    dot_color = stale_red
+    dot_size = 40  # Adjusted for side-by-side legibility
+    edge_col = (0.4, 0.4, 0.4, 0.03) # Very subtle gray transparent border
+    edge_width = 0.01
+    dot_alpha = 0.85
+   # for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market_Rel'], df['Model_Rel']):
+   #     z_ord = 10 if z_mkt >= z_mod else 1
+   #     ax.plot([x, x], [y, y], [z_mkt, z_mod], linestyle="-", color="#FF0000FF", alpha=0.65, linewidth=0.8, zorder=z_ord)
+# --- 2A. Dots BELOW the Surface (zorder=1) ---
+    # --- 2A. Dots BELOW the Surface (zorder=1) ---
+    # --- 2A. Dots BELOW the Surface (Fixed for Edge-Bleeding) ---
+# Goal: Points at the edge stick out half-way. We must manually darken them.
+
+# =========================================================================
+    # NEW LOGIC: THE "PERIMETER PROBE" + "SPINE SNIPING"
+    # =========================================================================
     
-    # --- Layer A: Triangular Surface ---
+    # 1. Setup the Triangulation (The map of the surface)
+    tri = mtri.Triangulation(df['Moneyness'].values, df['T'].values)
+    finder = tri.get_trifinder() # Tool to check "Is this point in a triangle?"
+
+    # 2. Define the "Probe Radius" 
+    # This represents the physical width of the dot in data-coordinates.
+    sensitivity = 0.02
+    span_x = df['Moneyness'].max() - df['Moneyness'].min()
+    span_y = df['T'].max() - df['T'].min()
+    
+    r_x = span_x * sensitivity
+    r_y = span_y * sensitivity
+
+    # --- NEW: SPINE DETECTION ---
+    # Find the Moneyness of the absolute highest market price
+    highest_idx = df['Market_Rel'].idxmax()
+    spine_moneyness = df.loc[highest_idx, 'Moneyness']
+    
+    # Define how wide the "spine" slice should be (adjust this threshold as needed)
+    spine_tolerance = 0.03
+
+    # 3. Analyze "Below" Points
+    df_below = df[df['Market_Rel'] < df['Model_Rel']].copy()
+    
+    if not df_below.empty:
+        # Get coordinates
+        xs = df_below['Moneyness'].values 
+        ys = df_below['T'].values
+        
+        # Perform lookups (Vectorized for speed)
+        # Check Center
+        mask_c = finder(xs, ys) == -1
+        # Check Right/Left
+        mask_r = finder(xs + r_x, ys) == -1
+        mask_l = finder(xs - r_x, ys) == -1
+        # Check Up/Down
+        mask_u = finder(xs, ys + r_y) == -1
+        mask_d = finder(xs, ys - r_y) == -1
+        
+        # --- NEW: Check if the point falls within the spine zone ---
+        mask_spine = np.abs(xs - spine_moneyness -0.025) <= spine_tolerance
+        
+        # Combine: If ANY part touches the void OR it's on the spine, mark it "Exposed"
+        is_exposed = mask_c | mask_r | mask_l | mask_u | mask_d | mask_spine
+        
+        df_below['is_exposed'] = is_exposed
+
+        # --- PLOTTING ---
+
+        # Group 1: SAFE Points (Fully Surrounded and Not on Spine)
+        # All probes landed inside triangles. 
+        # We keep these 'r' (Bright Red) -> Surface makes them shadowed.
+        df_safe = df_below[~df_below['is_exposed']]
+        
+        if not df_safe.empty:
+            ax.scatter(
+                df_safe['Moneyness'], df_safe['T'], df_safe['Market_Rel'], 
+                color='r', s=dot_size, label='Market Price', 
+                depthshade=False, zorder=2,    
+                edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
+            )
+
+        # Group 2: EXPOSED Points (Touching the Void OR on the Spine)
+        # These are physically sticking out of the mesh or manually sniped.
+        # We manually paint them Dark Red (#700000) to match the shadow look.
+        df_exposed = df_below[df_below['is_exposed']]
+        
+        if not df_exposed.empty:
+            lbl = "Market Price" if df_safe.empty else ""
+            ax.scatter(
+                df_exposed['Moneyness'], df_exposed['T'], df_exposed['Market_Rel'], 
+                color='#700000', s=dot_size, label=lbl, 
+                depthshade=False, zorder=2,    
+                edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
+            )
+    # --- 2B. Model Surface (zorder=3) ---
+    # Use the SAME triangulation to ensure visual match
     surf = ax.plot_trisurf(
-        df['Moneyness'], df['T'], df['Model'], 
-        cmap=cm.viridis, 
+        df['Moneyness'], df['T'], df['Model_Rel'], 
+        triangles=tri.triangles,
+        cmap=my_cmap, norm=norm,
         alpha=0.6, 
         edgecolor='none', 
         linewidth=0, 
-        antialiased=True, zorder=3
+        shade=False, 
+        antialiased=True, zorder=3       
     )
+      
+    # --- 2C. Dots ABOVE the Surface (zorder=10) ---
+    #if not df_above.empty:
+    #    lbl = "" if not df_below.empty else "Market Price"
+    #    ax.scatter(
+    #        df_above['Moneyness'], df_above['T'], df_above['Market_Rel'], 
+    #        color=dot_color, s=dot_size, label=lbl, 
+    #        depthshade=False, zorder=11,   
+    #        edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
+    #    )
 
-    # --- Layer C: Needles ---
-    for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market'], df['Model']):
-        ax.plot([x, x], [y, y], [z_mkt, z_mod], color='black', alpha=0.3, linewidth=0.8, zorder=2)
+    # --- 2D. Needles (Dynamic Z-Order) ---
 
-    # 3. LEGEND
+    # 3. SEAMLESS LEGEND
     ax.legend(
         loc='upper left', 
-        bbox_to_anchor=(0.09935, 0.799), #0.8265
-        frameon=True, 
+        bbox_to_anchor=(0.09935, 0.799), 
+        frameon=True,
+        facecolor=(0.95, 0.95, 0.95), 
         edgecolor='none', 
-        framealpha=1,
-        facecolor=(0.95, 0.95, 0.95),
-        labelcolor="black", 
-        fontsize=10,
+        framealpha=1.0, 
+        labelcolor="black", fontsize=10,
     )
 
-    # 4. TITLES (Removed for report readiness)
-
-    # 5. STYLING & FONTS
+    # 4. STYLING
     ax.dist = 11
-
-    # Labels
     ax.set_xlabel('Moneyness ($K/S_0$)', labelpad=5, fontsize=11)
     ax.set_ylabel('Maturity ($T$ Years)', labelpad=5, fontsize=11)
-    ax.set_zlabel('Option Price ($)', labelpad=5, fontsize=11)
+    ax.set_zlabel('Relative Price ($C/S_0$)', labelpad=5, fontsize=11)
 
-    # Unify Axis Tick Fonts
     for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
-        axis._axinfo["grid"].update({
-            'linewidth': 0.575,              
-            'alpha': 1
-        })
+        axis._axinfo["grid"].update({'linewidth': 0.575, 'alpha': 1})
+        axis.set_pane_color((0.95, 0.95, 0.95, 1.0))
         for label in axis.get_ticklabels():
-        #    label.set_family('monospace')
-            label.fontsize = 11
+            label.set_fontsize(11)
 
-    # Original TILT
     ax.view_init(elev=30, azim=-120)
-    
-    # Adjusted layout (top increased from 0.85 to 0.95 since titles are gone)
     fig.subplots_adjust(left=0.25, bottom=0.05, right=0.95, top=0.95)
 
-    # 6. Colorbar
-    cbar = fig.colorbar(surf, ax=ax, shrink=0.5, aspect=15, pad=-0.01)
-    cbar.ax.set_title("Model Price", fontsize=10, pad=9)
+    # 5. FIXED COLORBAR
+    m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
+    m.set_array([])
+    cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.01, alpha=0.6)
+    cbar.ax.set_title("Model / $S_0$", fontsize=10, pad=9)
     cbar.outline.set_visible(False)
-    cbar.ax.tick_params(labelsize=10)
-    #for l in cbar.ax.yaxis.get_ticklabels():
-    #    l.set_family('monospace')
-
-    # 7. Save to PDF (Vector Format)
-    save_path = csv_file.replace(".csv", "_price_surface_final.pdf")
-    plt.savefig(save_path, format='pdf', bbox_inches='tight', pad_inches=0.22)
-    print(f"-> Saved True Vector PDF: {save_path}")
-
-# --- Run ---
-if __name__ == "__main__":
-    files = glob.glob("results/calibration_*_prices.csv")
     
-    # Fallback to root directory if results folder is empty
-    if not files:
-        files = glob.glob("calibration_*_prices.csv")
-        
-    if files:
-        # Pick the latest file
-        files_sorted = sorted(files, key=os.path.getctime, reverse=True)
-        latest_file = files_sorted[1]
-        visualize_price_surface_final(latest_file)
-    else:
-        print("No calibration files found.")
+    tick_locations = [0.0, 0.02, 0.04, 0.06, 0.08, 0.10]
+    cbar.locator = FixedLocator(tick_locations)
+    cbar.update_ticks()
+    cbar.ax.tick_params(labelsize=10)
+
+    # 6. Save to PDF
+    save_path = csv_file.replace(".csv", "_relative_surface_FINAL.pdf")
+    plt.savefig(save_path, format='pdf', bbox_inches='tight', pad_inches=0.22)
+    #plt.show()
+    print(f"-> Saved Final Polished Vector PDF: {save_path}")
+
+if __name__ == "__main__":
+    files = glob.glob("results/calibration_*_prices.csv") or glob.glob("calibration_*_prices.csv")
+    for f in files:
+        visualize_price_surface_final(f)

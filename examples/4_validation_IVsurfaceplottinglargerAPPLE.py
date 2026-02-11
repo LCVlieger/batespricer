@@ -254,7 +254,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                     handle.set_color('#F0F0F0') # Matches your plot marker color
         from matplotlib.ticker import FixedLocator
         # --- COLORBAR ---
-        cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02)
+        cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02, alpha=0.8)
         tick_locations = np.arange(0.1, 0.8, 0.1) # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
         cbar.locator = FixedLocator(tick_locations)
         cbar.update_ticks()
