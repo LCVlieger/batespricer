@@ -60,15 +60,15 @@ def visualize_price_surface_final(csv_file):
     # --- DOT STYLING (Inspired by your IV plot) ---
     # We use a pure red, but with a subtle gray/transparent edge
     # to soften the harshness of the point on the light background
-    stale_red = "#970000" 
+    stale_red = "#CF0000"
     dot_color = stale_red
     dot_size = 40  # Adjusted for side-by-side legibility
-    edge_col = (0.4, 0.4, 0.4, 0.03) # Very subtle gray transparent border
+    edge_col = (0.5, 0.5, 0.5, 0.03) # Very subtle gray transparent border
     edge_width = 0.01
     dot_alpha = 0.85
-   # for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market_Rel'], df['Model_Rel']):
-   #     z_ord = 10 if z_mkt >= z_mod else 1
-   #     ax.plot([x, x], [y, y], [z_mkt, z_mod], linestyle="-", color="#FF0000FF", alpha=0.65, linewidth=0.8, zorder=z_ord)
+    for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market_Rel'], df['Model_Rel']):
+        z_ord = 10 if z_mkt >= z_mod else 1
+        ax.plot([x, x], [y, y], [z_mkt, z_mod], linestyle="-", color="#FF0000FF", alpha=0.65, linewidth=0.8, zorder=z_ord)
 # --- 2A. Dots BELOW the Surface (zorder=1) ---
     # --- 2A. Dots BELOW the Surface (zorder=1) ---
     # --- 2A. Dots BELOW the Surface (Fixed for Edge-Bleeding) ---
@@ -149,7 +149,7 @@ def visualize_price_surface_final(csv_file):
             lbl = "Market Price" if df_safe.empty else ""
             ax.scatter(
                 df_exposed['Moneyness'], df_exposed['T'], df_exposed['Market_Rel'], 
-                color='#700000', s=dot_size, label=lbl, 
+                color="#bf0000d3", s=dot_size, label=lbl, 
                 depthshade=False, zorder=2,    
                 edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
             )
@@ -167,19 +167,19 @@ def visualize_price_surface_final(csv_file):
     )
       
     # --- 2C. Dots ABOVE the Surface (zorder=10) ---
-    #if not df_above.empty:
-    #    lbl = "" if not df_below.empty else "Market Price"
-    #    ax.scatter(
-    #        df_above['Moneyness'], df_above['T'], df_above['Market_Rel'], 
-    #        color=dot_color, s=dot_size, label=lbl, 
-    #        depthshade=False, zorder=11,   
-    #        edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
-    #    )
+    if not df_above.empty:
+        lbl = "" if not df_below.empty else "Market Price"
+        ax.scatter(
+            df_above['Moneyness'], df_above['T'], df_above['Market_Rel'], 
+            color=dot_color, s=dot_size, label=lbl, 
+            depthshade=False, zorder=11,   
+            edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
+        )
 
     # --- 2D. Needles (Dynamic Z-Order) ---
 
     # 3. SEAMLESS LEGEND
-    ax.legend(
+    leg = ax.legend(
         loc='upper left', 
         bbox_to_anchor=(0.09935, 0.799), 
         frameon=True,
@@ -188,7 +188,8 @@ def visualize_price_surface_final(csv_file):
         framealpha=1.0, 
         labelcolor="black", fontsize=10,
     )
-
+    for handle in leg.legendHandles:
+        handle.set_color(stale_red)
     # 4. STYLING
     ax.dist = 11
     ax.set_xlabel('Moneyness ($K/S_0$)', labelpad=5, fontsize=11)
