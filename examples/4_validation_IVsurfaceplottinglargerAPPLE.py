@@ -1,20 +1,15 @@
 import json
 import glob
 import os
-import time
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits.mplot3d import Axes3D
-from scipy.ndimage import zoom
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import zoom, gaussian_filter
 from scipy.interpolate import interp1d
 import matplotlib.colors as mcolors
 from matplotlib.colors import LightSource
 from matplotlib.ticker import FixedLocator
-import io
-from PIL import Image
 
 # Local package imports
 try:
@@ -25,13 +20,11 @@ except ImportError:
 
 def create_gamma_cmap(base_cmap_name, gamma=0.5):
     base = cm.get_cmap(base_cmap_name)
-    # Create a smooth continuous map instead of a discrete list
     return mcolors.LinearSegmentedColormap.from_list(
         f'Warped_{base_cmap_name}',
-        [base(x**gamma) for x in np.linspace(0, 1, 1024)] # High res gradient
+        [base(x**gamma) for x in np.linspace(0, 1, 1024)]
     )
 
-# --- 1. COMPATIBILITY HELPERS ---
 class RobustYieldCurve:
     def __init__(self, curve_data):
         times, rates = [], []
@@ -41,294 +34,136 @@ class RobustYieldCurve:
                     t_str = str(k).lower().replace("y", "").replace("week", "")
                     times.append(float(t_str))
                     rates.append(float(v))
-                except: 
-                    continue
-        elif hasattr(curve_data, 'tenors'):
-            times = curve_data.tenors
-            rates = curve_data.rates
+                except: continue
         else:
-            times = [0.0, 30.0]
-            rates = [float(curve_data), float(curve_data)]
+            times, rates = [0.0, 30.0], [float(curve_data), float(curve_data)]
             
         sorted_pairs = sorted(zip(times, rates))
-        self.ts = np.array([p[0] for p in sorted_pairs])
-        self.rs = np.array([p[1] for p in sorted_pairs])
-        self.interp = interp1d(self.ts, self.rs, kind='linear', 
-                               bounds_error=False, fill_value=(self.rs[0], self.rs[-1]))
+        self.ts, self.rs = np.array([p[0] for p in sorted_pairs]), np.array([p[1] for p in sorted_pairs])
+        self.interp = interp1d(self.ts, self.rs, kind='linear', bounds_error=False, fill_value=(self.rs[0], self.rs[-1]))
 
     def get_rate(self, T):
         return float(self.interp(max(T, 1e-4)))
 
 class ReconstructedOption:
     def __init__(self, strike, maturity, price, option_type="CALL"):
-        self.strike = float(strike)
-        self.maturity = float(maturity)
-        self.market_price = float(price)
-        self.option_type = str(option_type)
+        self.strike, self.maturity, self.market_price, self.option_type = float(strike), float(maturity), float(price), str(option_type)
 
 def load_latest_calibration():
-    # Fixed the glob patterns with the requested /* wildcard structure
-    patterns = [
-    "results/*_meta.json",
-    "*_meta.json"
-]
-    files = []
-    for p in patterns: 
-        files.extend(glob.glob(p))
-        
-    if not files: 
-        raise FileNotFoundError("No calibration meta file found.")
-        
-    files_sorted = sorted(files, key=os.path.getctime)
-    latest_meta = files_sorted[-1] # Usually you want the most recent (-1) if sorted by ctime, or files_sorted[0] if you reverse. Assumed standard chronological sort.
+    files = glob.glob("results/*_meta.json") + glob.glob("*_meta.json")
+    if not files: raise FileNotFoundError("No calibration meta file found.")
+    latest_meta = sorted(files, key=os.path.getctime)[-1]
     base_name = latest_meta.replace("_meta.json", "")
-    print(f"Loading Artifact: {base_name}...")
-
-    with open(latest_meta, 'r') as f: 
-        data = json.load(f)
-
-    r_data = data['market'].get('r_sample', data['market'].get('r'))
-    q_data = data['market'].get('q_sample', data['market'].get('q'))
-
-    r_curve = RobustYieldCurve(r_data)
-    q_curve = RobustYieldCurve(q_data)
-
-    csv_file = f"{base_name}_prices.csv"
-    market_options = []
+    with open(latest_meta, 'r') as f: data = json.load(f)
+    r_curve, q_curve = RobustYieldCurve(data['market'].get('r_sample', data['market'].get('r'))), RobustYieldCurve(data['market'].get('q_sample', data['market'].get('q')))
     
+    market_options = []
+    csv_file = f"{base_name}_prices.csv"
     if os.path.exists(csv_file):
         df = pd.read_csv(csv_file)
         for _, row in df.iterrows():
-            k = row.get('K', row.get('Strike', 0))
-            t = row.get('T', row.get('Maturity', 0))
-            p = row.get('Market', row.get('Price', 0))
-            otype = row.get('Type', "CALL")
-            market_options.append(ReconstructedOption(k, t, p, otype))
-
+            market_options.append(ReconstructedOption(row.get('K', row.get('Strike', 0)), row.get('T', row.get('Maturity', 0)), row.get('Market', row.get('Price', 0)), row.get('Type', "CALL")))
     return data, r_curve, q_curve, market_options, base_name
 
-def select_best_parameters(data):
-    res_mc = data.get('analytical', {})
-    return res_mc, "Monte Carlo"
+def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, market_options, data_full):
+    # Model Params
+    p = params
+    k, th, xi, rho, v0 = p['kappa'], p['theta'], p['xi'], p['rho'], p['v0']
+    l, mj, sj = p.get('lamb', 0.0), p.get('mu_j', 0.0), p.get('sigma_j', 0.0)
 
-# --- 2. EXACT PLOTTING FUNCTION ---
-def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, market_options, data_full, dropped_count, source_name):
-    kappa, theta, xi, rho, v0 = params['kappa'], params['theta'], params['xi'], params['rho'], params['v0']
-    lamb = params.get('lamb', 0.0)
-    mu_j = params.get('mu_j', 0.0)
-    sigma_j = params.get('sigma_j', 0.0)
-    is_bates = lamb > 0.0
-
-    # --- CONFIGURATION ---
+    # Config
     LOWER_M, UPPER_M = 0.685, 1.315 
     LOWER_T, UPPER_T = 0.04, 1.5 
-    GRID_DENSITY = 47
+    GRID_DENSITY = 60 # Final resolution
 
-    M_range = np.linspace(LOWER_M, UPPER_M, GRID_DENSITY)
-    T_range = np.linspace(LOWER_T, UPPER_T, GRID_DENSITY)
+    # --- PHASE 1: GEOMETRIC ADAPTIVE MESH ---
+    # Coarse pass to find curvature
+    COARSE_N = 30
+    c_m, c_t = np.linspace(LOWER_M, UPPER_M, COARSE_N), np.linspace(LOWER_T, UPPER_T, COARSE_N)
+    cX, cY = np.meshgrid(c_m, c_t)
+    cZ = np.zeros_like(cX)
+
+    for i in range(COARSE_N):
+        for j in range(COARSE_N):
+            T, M = cY[i,j], cX[i,j]
+            price = BatesAnalyticalPricer.price_european_call_vectorized(S0, np.array([S0*M]), np.array([T]), np.array([r_curve.get_rate(T)]), np.array([q_curve.get_rate(T)]), k, th, xi, rho, v0, l, mj, sj)[0]
+            try: iv = implied_volatility(float(price), S0, S0*M, T, r_curve.get_rate(T), q_curve.get_rate(T), "CALL")
+            except: iv = np.nan
+            cZ[i,j] = iv if 0.01 < iv < 2.5 else np.nan
+    
+    cZ = pd.DataFrame(cZ).interpolate(axis=1).ffill(axis=1).bfill(axis=1).values
+    
+    # Calculate Curvature-based Monitor Function
+    dZ_dT, dZ_dM = np.gradient(cZ)
+    d2Z_dM2 = np.abs(np.gradient(dZ_dM, axis=1))
+    d2Z_dT2 = np.abs(np.gradient(dZ_dT, axis=0))
+    
+    # Weight nodes by second derivative (curvature)
+    w_m = np.sqrt(1 + 10.0 * d2Z_dM2.max(axis=0))
+    w_t = np.sqrt(1 + 10.0 * d2Z_dT2.max(axis=1))
+
+    def equidistribute(nodes, weights, n):
+        cdf = np.cumsum(weights)
+        cdf = (cdf - cdf[0]) / (cdf[-1] - cdf[0])
+        return interp1d(cdf, nodes, kind='linear', fill_value="extrapolate")(np.linspace(0, 1, n))
+
+    M_range = equidistribute(c_m, w_m, GRID_DENSITY)
+    T_range = equidistribute(c_t, w_t, GRID_DENSITY)
     X, Y = np.meshgrid(M_range, T_range)
     Z = np.zeros_like(X)
 
-    print(f"-> Generating Surface for: {ticker}")
-    print(f"   Model: {'Bates' if is_bates else 'Heston'}")
-    
-    # --- CALCULATION ---
+    # --- PHASE 2: FINAL COMPUTE ---
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
-            T_val, M_val = Y[i, j], X[i, j]
-            r_T = r_curve.get_rate(T_val)
-            q_T = q_curve.get_rate(T_val)
-            
-            prices = BatesAnalyticalPricer.price_european_call_vectorized(
-                S0, np.array([S0 * M_val]), np.array([T_val]), np.array([r_T]), np.array([q_T]),
-                kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
-            )
-            price = float(prices[0])
+            T, M = Y[i,j], X[i,j]
+            rt, qt = r_curve.get_rate(T), q_curve.get_rate(T)
+            price = BatesAnalyticalPricer.price_european_call_vectorized(S0, np.array([S0*M]), np.array([T]), np.array([rt]), np.array([qt]), k, th, xi, rho, v0, l, mj, sj)[0]
+            try: Z[i,j] = implied_volatility(float(price), S0, S0*M, T, rt, qt, "CALL")
+            except: Z[i,j] = np.nan
 
-            try:
-                iv = implied_volatility(price, S0, S0 * M_val, T_val, r_T, q_T, "CALL")
-                Z[i, j] = iv if 0.01 < iv < 2.5 else np.nan
-            except:
-                Z[i, j] = np.nan
-
-    mask = np.isnan(Z)
-    if np.any(mask):
-        Z = pd.DataFrame(Z).interpolate(method='linear', axis=1).ffill(axis=1).bfill(axis=1).values
-        
-    Z_smooth = gaussian_filter(Z, sigma=0)
+    Z = pd.DataFrame(Z).interpolate(axis=1).ffill(axis=1).bfill(axis=1).values
     
-    # --- PLOTTING ---
+    # --- PHASE 3: RENDERING ---
     with plt.style.context('dark_background'):
-        # Keep the chunkier size (10, 7) for better font scaling
-        fig = plt.figure(figsize=(10, 7), facecolor='black') 
+        fig = plt.figure(figsize=(10, 7), facecolor='black')
         ax = fig.add_subplot(111, projection='3d', facecolor='black')
-
-        zoom_factor = 5  
-        Z_highres = zoom(Z, zoom_factor, order=3) # Cubic interpolation
-        X_highres = zoom(X, zoom_factor, order=3)
-        Y_highres = zoom(Y, zoom_factor, order=3)
         
+        # High-res shading
+        zoom_f = 2
+        Z_h, X_h, Y_h = zoom(Z, zoom_f, order=3), zoom(X, zoom_f, order=3), zoom(Y, zoom_f, order=3)
         ls = LightSource(azdeg=270, altdeg=45)
-        vmin = 0.1151
-        vmax = 0.72
         my_cmap = create_gamma_cmap('RdYlBu_r', gamma=1.1)
-        norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        norm = mcolors.Normalize(vmin=0.115, vmax=0.72)
+        rgb = ls.shade(Z_h, cmap=my_cmap, norm=norm, vert_exag=0.1)
         
-        # Use the light source to shade the data
-        rgb = ls.shade(Z_highres, cmap=my_cmap, norm=norm, vert_exag=0.1)
-        surf = ax.plot_surface(X_highres, Y_highres, Z_highres, facecolors=rgb, cmap=my_cmap, 
-                               rcount=X_highres.shape[0], 
-                               ccount=X_highres.shape[1], 
-                               edgecolor='none', linewidth=0.0, alpha=0.8, #0.085   #0.8                     
-                               shade=False, antialiased=False, zorder=1, rasterized=True)
-                               
-        m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
-        m.set_array([])
-        
+        ax.plot_surface(X_h, Y_h, Z_h, facecolors=rgb, shade=False, antialiased=True, alpha=0.8, rasterized=True)
+
+        # Market Points
         if market_options:
-            plot_opts = [o for o in market_options 
-                         if (LOWER_M <= (o.strike/S0) <= UPPER_M) and (LOWER_T <= o.maturity <= UPPER_T)]
-            
-            valid_needles = 0
-            for opt in plot_opts:
-                m_mkt, t_mkt = opt.strike / S0, opt.maturity
-                try:
-                    r_T_mkt = r_curve.get_rate(t_mkt)
-                    q_T_mkt = q_curve.get_rate(t_mkt)
-                    iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, opt.option_type)
-                    prices_mod = BatesAnalyticalPricer.price_vectorized(
-                        S0, np.array([opt.strike]), np.array([t_mkt]), np.array([r_T_mkt]), np.array([q_T_mkt]), np.array([opt.option_type]),
-                        kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
-                    )
-                    iv_mod_exact = implied_volatility(float(prices_mod[0]), S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, opt.option_type)
-                    if iv_mkt < 0.01 or iv_mkt > 2.5: 
-                        continue
-                except: 
-                    continue
+            for opt in market_options:
+                m_mkt, t_mkt = opt.strike/S0, opt.maturity
+                if LOWER_M <= m_mkt <= UPPER_M and LOWER_T <= t_mkt <= UPPER_T:
+                    rt, qt = r_curve.get_rate(t_mkt), q_curve.get_rate(t_mkt)
+                    try:
+                        iv_mkt = implied_volatility(opt.market_price, S0, opt.strike, t_mkt, rt, qt, opt.option_type)
+                        p_mod = BatesAnalyticalPricer.price_vectorized(S0, np.array([opt.strike]), np.array([t_mkt]), np.array([rt]), np.array([qt]), np.array([opt.option_type]), k, th, xi, rho, v0, l, mj, sj)[0]
+                        iv_mod = implied_volatility(float(p_mod), S0, opt.strike, t_mkt, rt, qt, opt.option_type)
+                        ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mod, iv_mkt], color='white', linewidth=0.8, alpha=0.5)
+                        ax.scatter(m_mkt, t_mkt, iv_mkt, color='#F0F0F0', s=20, edgecolors='none', alpha=0.8)
+                    except: continue
 
-                valid_needles += 1
-                is_above = iv_mkt >= iv_mod_exact
-                dot_zorder = 10 if is_above else 1
-
-                ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mod_exact, iv_mkt], 
-                        color='white', linestyle='-', linewidth=0.8, alpha=0.65, zorder=dot_zorder)
-                lbl = 'Market IV' if valid_needles == 1 else ""
-                ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mkt], 
-                        marker='o', 
-                        linestyle='None', 
-                        color="#F0F0F0", 
-                        markersize=4.62, # 6.5, 
-                        markerfacecolor='#F0F0F0',
-                        markeredgecolor='none', # Adds the border
-                        markeredgewidth=0.01,     # Keeps it subtle
-                        alpha=0.85, 
-                        zorder=dot_zorder + 1, 
-                        label=lbl)
-                        
-        # --- AESTHETICS ---
-        ax.dist = 11  # Your preferred zoom level
-        ax.tick_params(axis='both', which='major', colors='#D7D7D7', labelsize=10)
-        ax.set_xlim(LOWER_M, UPPER_M)
-        ax.set_ylim(UPPER_T, LOWER_T) 
-        ax.set_zlim(0.0, 0.75)
+        # Styling
+        ax.view_init(elev=28, azim=-115)
+        ax.set_xlabel('Moneyness ($K/S_0$)'); ax.set_ylabel('Maturity ($T$)'); ax.set_zlabel('IV')
+        ax.set_zlim(0, 0.75); ax.dist = 11
         
-        grid_style = (0.23, 0.23, 0.23, 0.75) #(0.55, 0.55, 0.55, 0.35) 
-        linewidth_val = 1.77
-        ax.xaxis.set_pane_color((0,0,0,1))
-        ax.yaxis.set_pane_color((0,0,0,1))
-        ax.zaxis.set_pane_color((0,0,0,1))
-        
-        for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
-            axis.line.set_color("#D7D7D7")  # This is the axis spine
-            axis.line.set_linewidth(0.8)
-            
-        ax.xaxis._axinfo["grid"]['color'] = grid_style 
-        ax.yaxis._axinfo["grid"]['color'] = grid_style 
-        ax.zaxis._axinfo["grid"]['color'] = grid_style 
-        ax.xaxis._axinfo["grid"]['linewidth'] = linewidth_val
-        ax.yaxis._axinfo["grid"]['linewidth'] = linewidth_val
-        ax.zaxis._axinfo["grid"]['linewidth'] = linewidth_val
-        ax.view_init(elev=28, azim=-115) 
-
-        # Axis Labels: Padded to prevent overlap with tick labels
-        ax.set_xlabel('Moneyness ($K/S_0$)', color="#D7D7D7", labelpad=5, fontsize=11)
-        ax.set_ylabel('Maturity ($T$ Years)', color="#D7D7D7", labelpad=5, fontsize=11)
-        ax.set_zlabel(r'Implied Volatility', color="#D7D7D7", labelpad=6.75, fontsize=11)
-        ax.tick_params(axis='both', which='major', labelsize=10)
-
-        # --- TITLES ---
-        model_name = "Bates" if is_bates else "Heston"
-        
-        # FIX 1: Lower y-position to 0.78 to meet the zoomed-out (dist=11) plot
-        # FIX 2: Shift x to 0.52 to correct for 3D perspective shift 0.537675
-        #fig.text(0.55, 0.811, rf"{model_name} Implied Volatility Surface: ^SPX", 
-        #         color='white', fontsize=16, fontweight='bold', family='monospace', ha='center')
-
-        # --- LEGEND ---
-        if market_options and valid_needles > 0:
-            # FIX 3: Safe coordinates that won't float away
-            ax.legend(loc='upper left', 
-                      bbox_to_anchor=(0.175, 0.79), 
-                      frameon=True, 
-                      labelcolor="#D7D7D7",  # Keeps the text at d7d7
-                      handletextpad=0.5,
-                      edgecolor='none',
-                      fontsize=10)
-            
-            leg = ax.get_legend()
-            for handle in leg.legend_handles:
-                print(f"Before: {handle.get_markerfacecolor()}")
-                handle.set_markerfacecolor('#F0F0F0')
-                handle.set_markeredgecolor('none')
-                handle.set_markeredgewidth(0.01)
-                handle.set_alpha(1)
-                print(f"After: {handle.get_markerfacecolor()}")
-                
-        # --- COLORBAR ---
-        cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02, alpha=0.8)
-        tick_locations = np.arange(0.1, 0.8, 0.1) # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
-        cbar.locator = FixedLocator(tick_locations)
-        cbar.update_ticks()
-        cbar.ax.yaxis.set_tick_params(color="#D7D7D7", labelcolor="#D7D7D7", labelsize=10)
-        cbar.outline.set_visible(False)
-        cbar.ax.set_title("Model IV", color="#D7D7D7", fontsize=10, pad=9)
-        
-        save_path = f"{filename}_surface_refined.png"
-        
-        # FIX 4: Add pad_inches=0.2 to prevent slicing off labels
-        # 1. THE "NATIVE CROP": Adjust the subplot to fill the canvas
-        # This removes the "blank space" at the top and right manually
-        fig.subplots_adjust(top=0.98, bottom=0.02, left=0.02, right=0.98)
-
-        # 2. SAVE DIRECTLY TO VECTOR PDF
-        # We skip PIL entirely to preserve mathematical sharpness
-        save_path_vector = f"{filename}_surface_FINAL.pdf"
-        
-        plt.savefig(save_path_vector, 
-                    format='pdf', 
-                    bbox_inches='tight', 
-                    pad_inches=0.15, 
-                    facecolor='black', 
-                    dpi=600)
-        
-        print(f"-> Saved True Vector: {save_path_vector}")
+        plt.savefig(f"{filename}_surface_FINAL.pdf", format='pdf', bbox_inches='tight', facecolor='black', dpi=600)
+        print(f"-> Exported: {filename}_surface_FINAL.pdf")
 
 def main():
     try:
         data, r_curve, q_curve, market_options, base_name = load_latest_calibration()
-        S0 = data['market']['S0']
-        
-        best_params, source_name = select_best_parameters(data)
-        ticker = base_name.split("calibration_")[1].split("_")[0] if "calibration_" in base_name else "Asset"
-        
-        plot_surface_professional(
-            S0, r_curve, q_curve, best_params, ticker, base_name, 
-            market_options, data, 0, source_name
-        )
-    except Exception as e:
-        print(f"[Error] {e}")
-        import traceback
-        traceback.print_exc()
+        plot_surface_professional(data['market']['S0'], r_curve, q_curve, data.get('analytical', {}), "Asset", base_name, market_options, data)
+    except Exception as e: print(f"Error: {e}")
 
-if __name__ == "__main__":
-    main()
+if __name__ == "__main__": main()
