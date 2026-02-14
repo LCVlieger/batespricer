@@ -102,6 +102,8 @@ def select_best_parameters(data):
     res_mc = data.get('analytical', {})
     return res_mc, "Monte Carlo"
 # --- 2. EXACT PLOTTING FUNCTION ---
+from scipy.ndimage import zoom # Ensure this is imported
+
 def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, market_options, data_full, dropped_count, source_name):
     kappa, theta, xi, rho, v0 = params['kappa'], params['theta'], params['xi'], params['rho'], params['v0']
     lamb = params.get('lamb', 0.0)
@@ -122,7 +124,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     print(f"-> Generating Surface for: {ticker}")
     print(f"   Model: {'Bates' if is_bates else 'Heston'}")
     
-    # --- CALCULATION ---
+    # --- CALCULATION (Keeps original raster definition) ---
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
             T_val, M_val = Y[i, j], X[i, j]
@@ -144,28 +146,48 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     mask = np.isnan(Z)
     if np.any(mask):
         Z = pd.DataFrame(Z).interpolate(method='linear', axis=1).ffill(axis=1).bfill(axis=1).values
-    Z_smooth = gaussian_filter(Z, sigma=0)
+    
+    # Gaussian filter helps denoise the calculation artifacts before upscaling
+    Z_smooth = gaussian_filter(Z, sigma=0.5) 
+
+    # --- UPSCALING FOR VISUAL SMOOTHNESS ---
+    # We upscale the grid for PLOTTING ONLY. This creates the "100% smooth" look
+    # while respecting the original calculation cost.
+    zoom_factor = 5 
+    X_plot = zoom(X, zoom_factor, order=1) # Linear interpolation for coords
+    Y_plot = zoom(Y, zoom_factor, order=1)
+    Z_plot = zoom(Z_smooth, zoom_factor, order=3) # Cubic interpolation for curvature
 
     # --- PLOTTING ---
     with plt.style.context('dark_background'):
-        # Keep the chunkier size (10, 7) for better font scaling
         fig = plt.figure(figsize=(10, 7), facecolor='black') 
         ax = fig.add_subplot(111, projection='3d', facecolor='black')
-        from matplotlib.colors import LightSource
-        import matplotlib.colors as mcolors
+        
         ls = LightSource(azdeg=270, altdeg=45)
         vmin = 0.1151
-        vmax=0.72
+        vmax = 0.72
         my_cmap = create_gamma_cmap('RdYlBu_r', gamma=1.1)
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-        # Use the light source to shade the data
-        rgb = ls.shade(Z, cmap=my_cmap, norm=norm, vert_exag=0.1)
-        surf = ax.plot_surface(X, Y, Z_smooth, facecolors = rgb,    cmap=my_cmap, 
-                               rcount=100, ccount=100,  
-                               edgecolor='black', linewidth=0.0, alpha=0.8,#0.085   #0.8                     
-                               shade=False, antialiased=True, zorder=1)
+        
+        # Shade using the HIGH RES Z-data
+        rgb = ls.shade(Z_plot, cmap=my_cmap, norm=norm, vert_exag=0.1)
+        
+        # Plot Surface with anti-aliasing OFF to remove polygon borders
+        surf = ax.plot_surface(X_plot, Y_plot, Z_plot, 
+                               facecolors=rgb, 
+                               cmap=my_cmap, 
+                               rcount=GRID_DENSITY*zoom_factor, # Force matplotlib to use full res
+                               ccount=GRID_DENSITY*zoom_factor,  
+                               edgecolor='none', 
+                               linewidth=0, 
+                               alpha=0.8,
+                               shade=False, 
+                               antialiased=False, # <--- KEY FOR SMOOTHNESS (removes grid lines)
+                               zorder=1)
+
         m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
         m.set_array([])
+        
         if market_options:
             plot_opts = [o for o in market_options 
                          if (LOWER_M <= (o.strike/S0) <= UPPER_M) and (LOWER_T <= o.maturity <= UPPER_T)]
@@ -193,99 +215,65 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                         color='white', linestyle='-', linewidth=0.8, alpha=0.65, zorder=dot_zorder)
                 lbl = 'Market IV' if valid_needles == 1 else ""
                 ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mkt], 
-                        marker='o', 
-                        linestyle='None', 
-                        color="#F0F0F0", 
-                        markersize=6.5, 
-                        markeredgecolor=(0.5, 0.5, 0.5, 0.03), # Adds the border
-                        markeredgewidth=0.01,     # Keeps it subtle
-                        alpha=0.85, 
-                        zorder=dot_zorder + 1, 
-                        label=lbl)
+                        marker='o', linestyle='None', color="#F0F0F0", 
+                        markersize= 4.62, markerfacecolor='#F0F0F0',
+                        markeredgecolor='none', markeredgewidth=0.01, 
+                        alpha=0.85, zorder=dot_zorder + 1, label=lbl)
 
         # --- AESTHETICS ---
-        ax.dist = 11  # Your preferred zoom level
+        ax.dist = 11
         ax.tick_params(axis='both', which='major', colors='#D7D7D7', labelsize=10)
         ax.set_xlim(LOWER_M, UPPER_M)
         ax.set_ylim(UPPER_T, LOWER_T) 
         ax.set_zlim(0.0, 0.75)
-        grid_style = (0.23, 0.23, 0.23, 0.75) #(0.55, 0.55, 0.55, 0.35) 
+        
+        grid_style = (0.23, 0.23, 0.23, 0.75)
         linewidth_val = 1.77
-        ax.xaxis.set_pane_color((0, 0, 0, 1))
-        ax.yaxis.set_pane_color((0, 0, 0, 1))
-        ax.zaxis.set_pane_color((0, 0, 0, 1))
-        ax.xaxis._axinfo["grid"]['color'] = grid_style 
-        ax.yaxis._axinfo["grid"]['color'] = grid_style 
-        ax.zaxis._axinfo["grid"]['color'] = grid_style 
-        ax.xaxis._axinfo["grid"]['linewidth'] = linewidth_val
-        ax.yaxis._axinfo["grid"]['linewidth'] = linewidth_val
-        ax.zaxis._axinfo["grid"]['linewidth'] = linewidth_val
+        
+        ax.xaxis.set_pane_color((0,0,0,1))
+        ax.yaxis.set_pane_color((0,0,0,1))
+        ax.zaxis.set_pane_color((0,0,0,1))
+        
+        for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
+            axis.line.set_color("#D7D7D7")
+            axis.line.set_linewidth(0.8)
+            axis._axinfo["grid"]['color'] = grid_style 
+            axis._axinfo["grid"]['linewidth'] = linewidth_val
+
         ax.view_init(elev=28, azim=-115) 
 
-        # Axis Labels: Padded to prevent overlap with tick labels
         ax.set_xlabel('Moneyness ($K/S_0$)', color="#D7D7D7", labelpad=5, fontsize=11)
         ax.set_ylabel('Maturity ($T$ Years)', color="#D7D7D7", labelpad=5, fontsize=11)
-        ax.set_zlabel(r'Implied Volatility', color="#D7D7D7", labelpad=5, fontsize=11)
-        ax.tick_params(axis='both', which='major', labelsize=10)
+        ax.set_zlabel(r'Implied Volatility', color="#D7D7D7", labelpad=6.75, fontsize=11)
 
-        # --- TITLES ---
-        model_name = "Bates" if is_bates else "Heston"
-        
-        # FIX 1: Lower y-position to 0.78 to meet the zoomed-out (dist=11) plot
-        # FIX 2: Shift x to 0.52 to correct for 3D perspective shift 0.537675
-        #fig.text(0.55, 0.811, rf"{model_name} Implied Volatility Surface: ^SPX", 
-        #         color='white', fontsize=16, fontweight='bold', family='monospace', ha='center')
-
-        # --- LEGEND ---
         if market_options and valid_needles > 0:
-            # FIX 3: Safe coordinates that won't float away
-            ax.legend(loc='upper left', 
-              bbox_to_anchor=(0.175, 0.79), 
-              frameon=True, 
-              labelcolor="#D7D7D7",  # Keeps the text at d7d7
-              handletextpad=0.5,
-              edgecolor='none',
-              fontsize=10)
+            ax.legend(loc='upper left', bbox_to_anchor=(0.175, 0.79), 
+            frameon=True, labelcolor="#D7D7D7", handletextpad=0.5,
+            edgecolor='none', fontsize=10)
+            
+            # Fix legend marker colors
             leg = ax.get_legend()
             for handle in leg.legend_handles:
-                handle.set_color('#F0F0F0') # Matches your plot marker color
-        from matplotlib.ticker import FixedLocator
+                handle.set_markerfacecolor('#F0F0F0')
+                handle.set_markeredgecolor('none')
+                handle.set_alpha(1)
+
         # --- COLORBAR ---
+        from matplotlib.ticker import FixedLocator
         cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02, alpha=0.8)
-        tick_locations = np.arange(0.1, 0.8, 0.1) # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
+        tick_locations = np.arange(0.1, 0.8, 0.1)
         cbar.locator = FixedLocator(tick_locations)
         cbar.update_ticks()
         cbar.ax.yaxis.set_tick_params(color="#D7D7D7", labelcolor="#D7D7D7", labelsize=10)
         cbar.outline.set_visible(False)
         cbar.ax.set_title("Model IV", color="#D7D7D7", fontsize=10, pad=9)
         
-        save_path = f"{filename}_surface_refined.png"
-        
-        # FIX 4: Add pad_inches=0.2 to prevent slicing off labels
-        # 1. Save to a temporary buffer first
-        import io
-        from PIL import Image
-
-        # --- AESTHETICS ---
-        ax.dist = 11 
-        ax.view_init(elev=28, azim=-115) 
-        
-        # 1. THE "NATIVE CROP": Adjust the subplot to fill the canvas
-        # This removes the "blank space" at the top and right manually
         fig.subplots_adjust(top=0.98, bottom=0.02, left=0.02, right=0.98)
 
-        # 2. SAVE DIRECTLY TO VECTOR PDF
-        # We skip PIL entirely to preserve mathematical sharpness
         save_path_vector = f"{filename}_surface_FINAL.pdf"
-        
-        plt.savefig(save_path_vector, 
-                    format='pdf', 
-                    bbox_inches='tight', 
-                    pad_inches=0.05, 
-                    facecolor='black')
-        
+        plt.savefig(save_path_vector, format='pdf', bbox_inches='tight', pad_inches=0.15, facecolor='black')
         print(f"-> Saved True Vector: {save_path_vector}")
-
+        
 def main():
     try:
         data, r_curve, q_curve, market_options, base_name = load_latest_calibration()

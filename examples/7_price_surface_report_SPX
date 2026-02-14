@@ -44,7 +44,7 @@ def visualize_price_surface_final(csv_file):
     df['Model_Rel'] = df['Model'] / s0
 
     # --- FIXED SCALE & GAMMA POP ---
-    vmin, vmax = 0.0, 0.11
+    vmin, vmax = 0.0, (0.10145+0.003)
     norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
     my_cmap = create_gamma_cmap('viridis', gamma=0.5) 
 
@@ -60,11 +60,11 @@ def visualize_price_surface_final(csv_file):
     # --- DOT STYLING (Inspired by your IV plot) ---
     # We use a pure red, but with a subtle gray/transparent edge
     # to soften the harshness of the point on the light background
-    stale_red = "#9E0000" #"#BC0000"
+    stale_red = "#9E0000" #"#9E0000" 
     dot_color = stale_red
     dot_size = 39  # Adjusted for side-by-side legibility
     edge_col = 'none'#(0.52, 0.02, 0.02, 0.03) # Very subtle gray transparent border
-    edge_width = 0.01
+    edge_width = 0.0
     dot_alpha = 0.7
     for x, y, z_mkt, z_mod in zip(df['Moneyness'], df['T'], df['Market_Rel'], df['Model_Rel']):
         z_ord = 10 if z_mkt >= z_mod else 1
@@ -135,7 +135,7 @@ def visualize_price_surface_final(csv_file):
         if not df_safe.empty:
             ax.scatter(
                 df_safe['Moneyness'], df_safe['T'], df_safe['Market_Rel'], 
-                color='r', s=dot_size, label='Market Price', 
+                color='r', s=dot_size, label='Market / $S_0$', 
                 depthshade=False, zorder=2,    
                 edgecolor=edge_col, linewidth=edge_width, alpha=dot_alpha
             )
@@ -181,7 +181,7 @@ def visualize_price_surface_final(csv_file):
     # 3. SEAMLESS LEGEND
     leg = ax.legend(
         loc='upper left', 
-        bbox_to_anchor=(0.09935, 0.799), 
+        bbox_to_anchor=(0.09935, 0.7774), #(0.09935, 0.799)
         frameon=True,
         facecolor=(0.95, 0.95, 0.95), 
         edgecolor='none', 
@@ -200,7 +200,15 @@ def visualize_price_surface_final(csv_file):
     ax.set_xlabel('Moneyness ($K/S_0$)', labelpad=5, fontsize=11)
     ax.set_ylabel('Maturity ($T$ Years)', labelpad=5, fontsize=11)
     ax.set_zlabel('Relative Price ($C/S_0$)', labelpad=6.75, fontsize=11)
-
+    LOWER_M, UPPER_M = np.min(df['Moneyness']), np.max(df['Moneyness'])
+    print(LOWER_M)
+    print(UPPER_M)
+    #LOWER_M = 0.7011362125108466
+    #UPPER_M = 1.2999133663149034
+    LOWER_T, UPPER_T = 0.04, 1.1069
+    ax.set_xlim(LOWER_M, UPPER_M)
+    ax.set_ylim(LOWER_T, UPPER_T) 
+    ax.set_zlim(0.0, (0.10145+0.003))
     for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
         axis._axinfo["grid"].update({'linewidth': 0.575, 'alpha': 1, 'color': (0.68, 0.68, 0.68, 0.5),})
         axis.set_pane_color((0.95, 0.95, 0.95, 1.0))
@@ -224,8 +232,8 @@ def visualize_price_surface_final(csv_file):
 
     # 6. Save to PDF
     save_path = csv_file.replace(".csv", "_relative_surface_FINAL.pdf")
-    plt.savefig(save_path, format='pdf', bbox_inches='tight', pad_inches=0.22)
-    #plt.show()
+    plt.savefig(save_path, format='pdf', bbox_inches='tight', pad_inches=0.22, dpi = 600)
+    plt.show()
     print(f"-> Saved Final Polished Vector PDF: {save_path}")
 
 if __name__ == "__main__":

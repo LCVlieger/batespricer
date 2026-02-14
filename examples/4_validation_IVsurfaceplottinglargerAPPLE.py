@@ -6,9 +6,15 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from mpl_toolkits.mplot3d import Axes3D 
-from scipy.ndimage import gaussian_filter 
+from mpl_toolkits.mplot3d import Axes3D
+from scipy.ndimage import zoom
+from scipy.ndimage import gaussian_filter
 from scipy.interpolate import interp1d
+import matplotlib.colors as mcolors
+from matplotlib.colors import LightSource
+from matplotlib.ticker import FixedLocator
+import io
+from PIL import Image
 
 # Local package imports
 try:
@@ -16,22 +22,14 @@ try:
     from heston_pricer.analytics import BatesAnalyticalPricer, implied_volatility
 except ImportError:
     pass
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import matplotlib.colors as mcolors
-from matplotlib.colors import LightSource
 
 def create_gamma_cmap(base_cmap_name, gamma=0.5):
     base = cm.get_cmap(base_cmap_name)
-    N = 256
-    # Create a linear ramp
-    values = np.linspace(0, 0.75, N)
-    # Apply gamma correction to the indices we pull from the original map
-    # gamma < 1 stretches the low end (makes it pop)
-    warped_values = values ** gamma 
-    colors = base(warped_values)
-    return mcolors.ListedColormap(colors, name=f'Warped_{base_cmap_name}')
-
+    # Create a smooth continuous map instead of a discrete list
+    return mcolors.LinearSegmentedColormap.from_list(
+        f'Warped_{base_cmap_name}',
+        [base(x**gamma) for x in np.linspace(0, 1, 1024)] # High res gradient
+    )
 
 # --- 1. COMPATIBILITY HELPERS ---
 class RobustYieldCurve:
@@ -43,14 +41,15 @@ class RobustYieldCurve:
                     t_str = str(k).lower().replace("y", "").replace("week", "")
                     times.append(float(t_str))
                     rates.append(float(v))
-                except: continue
+                except: 
+                    continue
         elif hasattr(curve_data, 'tenors'):
             times = curve_data.tenors
             rates = curve_data.rates
         else:
             times = [0.0, 30.0]
             rates = [float(curve_data), float(curve_data)]
-
+            
         sorted_pairs = sorted(zip(times, rates))
         self.ts = np.array([p[0] for p in sorted_pairs])
         self.rs = np.array([p[1] for p in sorted_pairs])
@@ -68,26 +67,35 @@ class ReconstructedOption:
         self.option_type = str(option_type)
 
 def load_latest_calibration():
-    patterns = ['results/calibration_*_meta.json', 'calibration_*_meta.json']
+    # Fixed the glob patterns with the requested /* wildcard structure
+    patterns = [
+    "results/*_meta.json",
+    "*_meta.json"
+]
     files = []
-    for p in patterns: files.extend(glob.glob(p))
-    
-    if not files: raise FileNotFoundError("No calibration meta file found.")
+    for p in patterns: 
+        files.extend(glob.glob(p))
+        
+    if not files: 
+        raise FileNotFoundError("No calibration meta file found.")
+        
     files_sorted = sorted(files, key=os.path.getctime)
-    latest_meta = files_sorted[0]
+    latest_meta = files_sorted[-1] # Usually you want the most recent (-1) if sorted by ctime, or files_sorted[0] if you reverse. Assumed standard chronological sort.
     base_name = latest_meta.replace("_meta.json", "")
     print(f"Loading Artifact: {base_name}...")
-    
-    with open(latest_meta, 'r') as f: data = json.load(f)
-    
+
+    with open(latest_meta, 'r') as f: 
+        data = json.load(f)
+
     r_data = data['market'].get('r_sample', data['market'].get('r'))
     q_data = data['market'].get('q_sample', data['market'].get('q'))
-    
+
     r_curve = RobustYieldCurve(r_data)
     q_curve = RobustYieldCurve(q_data)
 
     csv_file = f"{base_name}_prices.csv"
     market_options = []
+    
     if os.path.exists(csv_file):
         df = pd.read_csv(csv_file)
         for _, row in df.iterrows():
@@ -146,28 +154,37 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     mask = np.isnan(Z)
     if np.any(mask):
         Z = pd.DataFrame(Z).interpolate(method='linear', axis=1).ffill(axis=1).bfill(axis=1).values
+        
     Z_smooth = gaussian_filter(Z, sigma=0)
-
+    
     # --- PLOTTING ---
     with plt.style.context('dark_background'):
         # Keep the chunkier size (10, 7) for better font scaling
         fig = plt.figure(figsize=(10, 7), facecolor='black') 
         ax = fig.add_subplot(111, projection='3d', facecolor='black')
-        from matplotlib.colors import LightSource
-        import matplotlib.colors as mcolors
+
+        zoom_factor = 5  
+        Z_highres = zoom(Z, zoom_factor, order=3) # Cubic interpolation
+        X_highres = zoom(X, zoom_factor, order=3)
+        Y_highres = zoom(Y, zoom_factor, order=3)
+        
         ls = LightSource(azdeg=270, altdeg=45)
         vmin = 0.1151
-        vmax=0.72
+        vmax = 0.72
         my_cmap = create_gamma_cmap('RdYlBu_r', gamma=1.1)
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+        
         # Use the light source to shade the data
-        rgb = ls.shade(Z, cmap=my_cmap, norm=norm, vert_exag=0.1)
-        surf = ax.plot_surface(X, Y, Z_smooth, facecolors = rgb,    cmap=my_cmap, 
-                               rcount=100, ccount=100,  
-                               edgecolor='black', linewidth=0.0, alpha=0.8,#0.085   #0.8                     
-                               shade=False, antialiased=True, zorder=1)
+        rgb = ls.shade(Z_highres, cmap=my_cmap, norm=norm, vert_exag=0.1)
+        surf = ax.plot_surface(X_highres, Y_highres, Z_highres, facecolors=rgb, cmap=my_cmap, 
+                               rcount=X_highres.shape[0], 
+                               ccount=X_highres.shape[1], 
+                               edgecolor='none', linewidth=0.0, alpha=0.8, #0.085   #0.8                     
+                               shade=False, antialiased=False, zorder=1, rasterized=True)
+                               
         m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
         m.set_array([])
+        
         if market_options:
             plot_opts = [o for o in market_options 
                          if (LOWER_M <= (o.strike/S0) <= UPPER_M) and (LOWER_T <= o.maturity <= UPPER_T)]
@@ -184,8 +201,10 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                         kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j
                     )
                     iv_mod_exact = implied_volatility(float(prices_mod[0]), S0, opt.strike, t_mkt, r_T_mkt, q_T_mkt, opt.option_type)
-                    if iv_mkt < 0.01 or iv_mkt > 2.5: continue
-                except: continue
+                    if iv_mkt < 0.01 or iv_mkt > 2.5: 
+                        continue
+                except: 
+                    continue
 
                 valid_needles += 1
                 is_above = iv_mkt >= iv_mod_exact
@@ -198,23 +217,31 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                         marker='o', 
                         linestyle='None', 
                         color="#F0F0F0", 
-                        markersize=6.5, 
-                        markeredgecolor=(0.5, 0.5, 0.5, 0.03), # Adds the border
+                        markersize=4.62, # 6.5, 
+                        markerfacecolor='#F0F0F0',
+                        markeredgecolor='none', # Adds the border
                         markeredgewidth=0.01,     # Keeps it subtle
                         alpha=0.85, 
                         zorder=dot_zorder + 1, 
                         label=lbl)
+                        
         # --- AESTHETICS ---
         ax.dist = 11  # Your preferred zoom level
         ax.tick_params(axis='both', which='major', colors='#D7D7D7', labelsize=10)
         ax.set_xlim(LOWER_M, UPPER_M)
         ax.set_ylim(UPPER_T, LOWER_T) 
         ax.set_zlim(0.0, 0.75)
+        
         grid_style = (0.23, 0.23, 0.23, 0.75) #(0.55, 0.55, 0.55, 0.35) 
         linewidth_val = 1.77
-        ax.xaxis.set_pane_color((0, 0, 0, 1))
-        ax.yaxis.set_pane_color((0, 0, 0, 1))
-        ax.zaxis.set_pane_color((0, 0, 0, 1))
+        ax.xaxis.set_pane_color((0,0,0,1))
+        ax.yaxis.set_pane_color((0,0,0,1))
+        ax.zaxis.set_pane_color((0,0,0,1))
+        
+        for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
+            axis.line.set_color("#D7D7D7")  # This is the axis spine
+            axis.line.set_linewidth(0.8)
+            
         ax.xaxis._axinfo["grid"]['color'] = grid_style 
         ax.yaxis._axinfo["grid"]['color'] = grid_style 
         ax.zaxis._axinfo["grid"]['color'] = grid_style 
@@ -226,7 +253,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         # Axis Labels: Padded to prevent overlap with tick labels
         ax.set_xlabel('Moneyness ($K/S_0$)', color="#D7D7D7", labelpad=5, fontsize=11)
         ax.set_ylabel('Maturity ($T$ Years)', color="#D7D7D7", labelpad=5, fontsize=11)
-        ax.set_zlabel(r'Implied Volatility', color="#D7D7D7", labelpad=5, fontsize=11)
+        ax.set_zlabel(r'Implied Volatility', color="#D7D7D7", labelpad=6.75, fontsize=11)
         ax.tick_params(axis='both', which='major', labelsize=10)
 
         # --- TITLES ---
@@ -240,19 +267,23 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         # --- LEGEND ---
         if market_options and valid_needles > 0:
             # FIX 3: Safe coordinates that won't float away
-            if market_options and valid_needles > 0:
-            # FIX 3: Safe coordinates that won't float away
-                ax.legend(loc='upper left', 
-                bbox_to_anchor=(0.175, 0.79), 
-                frameon=True,
-                edgecolor='none',
-                labelcolor="#D7D7D7",  # Keeps the text at d7d7
-                handletextpad=0.5,
-                fontsize=10)
-                leg = ax.get_legend()
-                for handle in leg.legend_handles:
-                    handle.set_color('#F0F0F0') # Matches your plot marker color
-        from matplotlib.ticker import FixedLocator
+            ax.legend(loc='upper left', 
+                      bbox_to_anchor=(0.175, 0.79), 
+                      frameon=True, 
+                      labelcolor="#D7D7D7",  # Keeps the text at d7d7
+                      handletextpad=0.5,
+                      edgecolor='none',
+                      fontsize=10)
+            
+            leg = ax.get_legend()
+            for handle in leg.legend_handles:
+                print(f"Before: {handle.get_markerfacecolor()}")
+                handle.set_markerfacecolor('#F0F0F0')
+                handle.set_markeredgecolor('none')
+                handle.set_markeredgewidth(0.01)
+                handle.set_alpha(1)
+                print(f"After: {handle.get_markerfacecolor()}")
+                
         # --- COLORBAR ---
         cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02, alpha=0.8)
         tick_locations = np.arange(0.1, 0.8, 0.1) # [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
@@ -265,14 +296,6 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         save_path = f"{filename}_surface_refined.png"
         
         # FIX 4: Add pad_inches=0.2 to prevent slicing off labels
-        # 1. Save to a temporary buffer first
-        import io
-        from PIL import Image
-
-        # --- AESTHETICS ---
-        ax.dist = 11 
-        ax.view_init(elev=28, azim=-115) 
-        
         # 1. THE "NATIVE CROP": Adjust the subplot to fill the canvas
         # This removes the "blank space" at the top and right manually
         fig.subplots_adjust(top=0.98, bottom=0.02, left=0.02, right=0.98)
@@ -284,8 +307,9 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         plt.savefig(save_path_vector, 
                     format='pdf', 
                     bbox_inches='tight', 
-                    pad_inches=0.05, 
-                    facecolor='black')
+                    pad_inches=0.15, 
+                    facecolor='black', 
+                    dpi=600)
         
         print(f"-> Saved True Vector: {save_path_vector}")
 
@@ -301,7 +325,6 @@ def main():
             S0, r_curve, q_curve, best_params, ticker, base_name, 
             market_options, data, 0, source_name
         )
-        
     except Exception as e:
         print(f"[Error] {e}")
         import traceback
