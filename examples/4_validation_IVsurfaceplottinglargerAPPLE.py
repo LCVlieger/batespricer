@@ -23,14 +23,95 @@ try:
 except ImportError:
     pass
 
-def create_gamma_cmap(base_cmap_name, gamma=0.5):
+def create_premium_cmap(base_cmap_name):
     base = cm.get_cmap(base_cmap_name)
-    return mcolors.LinearSegmentedColormap.from_list(
-        f'Warped_{base_cmap_name}',
-        [base(x**gamma) for x in np.linspace(0, 1, 1024)] 
-    )
+    N = 256
+    values = np.linspace(0.007125, 0.6485, N) #0.02 195
+    
+    # --- Define Thresholds --- 
+    t1 = 0.1  # End of the 'Floor' (Blue) 0.12
+    t2 = 0.21  # Start of the 'Peaks' (Gold)
+    
+    # --- Define Gammas ---
+    g_floor = 1.3  # >1 compresses the dark blue (keeps it at the bottom)
+    g_slope = 0.78  # <1 expands the 'glow' transition (Cyan/White)
+    g_peak  = 0.7  # <1 expands the gold at the very top for lighting
+    
+    warped_values = np.zeros_like(values)
 
-# --- 1. COMPATIBILITY HELPERS ---
+    # 1. Segment One: The Floor (0 to t1)
+    mask1 = values <= t1
+    s1 = values[mask1] / t1
+    warped_values[mask1] = (s1 ** g_floor) * t1
+
+    # 2. Segment Two: The Slope (t1 to t2)
+    mask2 = (values > t1) & (values <= t2)
+    if np.any(mask2):
+        # Normalize values to 0.0 - 1.0 range
+        s2 = (values[mask2] - t1) / (t2 - t1)
+        
+        # 1. Calculate Smootherstep (Perlin)
+        # Provides 0 acceleration at start and end
+        s2_smooth = s2 * s2 * s2 * (s2 * (s2 * 6.0 - 15.0) + 10.0)
+        
+        # 2. Apply Bias (Gamma)
+        # gamma > 1.0 stretches the curve "down" towards t1
+        # Try 1.5 for a moderate stretch, 2.0+ for intense stretching
+        gamma = 0.3
+        s2_weighted = np.power(s2_smooth, gamma)
+        
+        warped_values[mask2] = s2_weighted * (t2 - t1) + t1
+# 3. Segment Three: The Peaks (t2 to max) - Sine Ease-Out for vibrant highlights
+    mask3 = values > t2
+    if np.any(mask3):
+        v_max = values.max()
+        s3 = np.maximum(0, (values[mask3] - t2) / (v_max - t2))
+        # Apply Sine ease-out to avoid the "bland plateau"
+        s3_sine = np.sin(s3 * np.pi / 2.0)
+        warped_values[mask3] = s3_sine * (v_max - t2) + t2
+
+    warped_values = np.clip(warped_values, 0, 1)
+    colors = base(warped_values)
+    
+    return mcolors.ListedColormap(colors, name=f'Warped_3Seg_{base_cmap_name}')
+
+def create_premium_cmap_1():
+    """
+    'Neon Surface' Colormap.
+    Specifically calibrated for Black Backgrounds.
+    Lifts the 'floor' luminance so the blue does not disappear.
+    """
+    #colors = [
+    #    "#0F3CB7",  # Bright Dodger Blue
+    #      # Deep transition
+    #    "#3498DB",  # Mid Blue
+    #    "#00C6FF",  # Laser Cyan
+    #    "#E0F7FA",  # Icy White (The 'Shine' point)
+    #    "#FFF176",  # Champagne 
+    #    "#FFC107"   # Amber/Gold (The Peak)
+    #]
+    colors = [
+            "#081B4B",  # Deep Midnight/Navy (The deep OTM/ITM base)
+            "#0F3CB7",  # Bright Dodger Blue
+            "#3498DB",  # Mid Blue
+            "#00C6FF",  # Laser Cyan (Transition)
+            "#B2EBF2",  # Pale Cyan 
+            "#E0F7FA"   # Icy White (The Peak / highest volatility)
+        ]
+    # We position the nodes to give the blue floor more space, 
+    # ensuring the whole surface looks illuminated.
+    nodes = [0.0, 0.1, 0.3, 0.45, 0.6, 0.8, 1.0]
+    
+    cmap = mcolors.LinearSegmentedColormap.from_list("NeonGold", list(zip(nodes, colors)))
+    base = cm.get_cmap(cmap)
+    gamma=0.8
+    N = 256
+    values = np.linspace(0, 0.75, N)
+    # Apply gamma correction to the indices we pull from the original map
+    # gamma < 1 stretches the low end (makes it pop)
+    warped_values = values ** gamma 
+    return cmap
+
 class RobustYieldCurve:
     def __init__(self, curve_data):
         times, rates = [], []
@@ -74,11 +155,10 @@ def load_calibration_by_index(index):
     if not files: 
         raise FileNotFoundError("No calibration meta file found.")
         
-    # Sort by modification time, newest first
     files_sorted = sorted(files, key=os.path.getmtime, reverse=True)
     
     if index >= len(files_sorted):
-        return None # Handle cases where fewer than 2 files exist
+        return None 
     latest_meta = files_sorted[index]
     base_name = latest_meta.replace("_meta.json", "")
     print(f"Loading Artifact: {base_name}...")
@@ -110,7 +190,6 @@ def select_best_parameters(data):
     res_mc = data.get('analytical', {})
     return res_mc, "Monte Carlo"
 
-# --- 2. EXACT PLOTTING FUNCTION ---
 def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, market_options, data_full, dropped_count, source_name):
     kappa, theta, xi, rho, v0 = params['kappa'], params['theta'], params['xi'], params['rho'], params['v0']
     lamb = params.get('lamb', 0.0)
@@ -118,21 +197,15 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     sigma_j = params.get('sigma_j', 0.0)
     is_bates = lamb > 0.0
 
-    # --- CONFIGURATION ---
-    LOWER_M, UPPER_M = 0.685, 1.315 
+    LOWER_M, UPPER_M = 0.685, 1.315                    
     LOWER_T, UPPER_T = 0.04, 1.5 
-    GRID_DENSITY = 550
+    GRID_DENSITY =  60 # 550# 550 #80
 
     print(f"-> Generating Surface for: {ticker}")
     print(f"   Model: {'Bates' if is_bates else 'Heston'}")
     print(f"   Calculating true gradient-based adaptive mesh...")
     
-    # ==========================================
-    # --- PHASE 1: ROBUST HYBRID MESH ---
-    # ==========================================
-    
-    # 1A. Coarse Pass (Scan the surface)
-    COARSE_N = 150
+    COARSE_N = 30 # 120 #80  150
     c_M = np.linspace(LOWER_M, UPPER_M, COARSE_N)
     c_T = np.linspace(LOWER_T, UPPER_T, COARSE_N)
     cX, cY = np.meshgrid(c_M, c_T)
@@ -153,50 +226,34 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             except:
                 cZ[i, j] = np.nan
 
-    # Robust NaN cleaning
     mask = np.isnan(cZ)
     if np.any(mask):
         cZ = pd.DataFrame(cZ).interpolate(method='linear', axis=1, limit_direction='both') \
                              .interpolate(method='linear', axis=0, limit_direction='both').values
 
-    # 1B. Extract Gradient
-    dZ_dT, dZ_dM = np.gradient(cZ, c_T, c_M)
-    grad_mag = np.sqrt(dZ_dT**2 + dZ_dM**2)
-    
-    # Clip Singularity: T=0 has infinite gradient. We cap it to avoid breaking the weighting logic.
-    max_grad = np.percentile(grad_mag, 92) 
-    grad_mag = np.clip(grad_mag, 0, max_grad)
-    
-    # 1C. Density Function
     DENSITY_POWER = 2.3
-    dens_M = np.mean(grad_mag, axis=0)**DENSITY_POWER
-    dens_T = np.mean(grad_mag, axis=1)**DENSITY_POWER
-    
-    # Smooth slightly
-    dens_M = gaussian_filter(dens_M, sigma=1.0)
-    dens_T = gaussian_filter(dens_T, sigma=1.0)
+    if cZ is not None and hasattr(cZ, 'shape') and cZ.shape[0] >= 2 and cZ.shape[1] >= 2:
+        try:
+            dZ_dT, dZ_dM = np.gradient(cZ, c_T, c_M)
+            grad_mag = np.sqrt(dZ_dT**2 + dZ_dM**2)
+            max_grad = np.percentile(grad_mag, 92) 
+            grad_mag = np.clip(grad_mag, 0, max_grad)
+            dens_M = np.mean(grad_mag, axis=0)**DENSITY_POWER
+            dens_T = np.mean(grad_mag, axis=1)**DENSITY_POWER
+        except ValueError:
+            dens_M, dens_T = np.ones(len(c_M)), np.ones(len(c_T))
+    else:
+        dens_M, dens_T = np.ones(len(c_M)), np.ones(len(c_T))
 
-    # 1D. MIXING STRATEGY (CRITICAL FIX)
-    # To prevent "starvation" of the flat areas (which caused the faceting/tenting on the right),
-    # we mix the Gradient CDF with a Linear CDF.
-    # 70% Gradient-based (Detail where needed)
-    # 30% Uniform (Guaranteed coverage everywhere)
-    
     def get_hybrid_spacing(density_array, grid_points, mix_ratio=0.7):
-        # 1. Gradient CDF
         cdf_grad = np.cumsum(density_array)
         if cdf_grad[-1] - cdf_grad[0] == 0:
             cdf_grad = np.linspace(0, 1, len(density_array))
         else:
             cdf_grad = (cdf_grad - cdf_grad[0]) / (cdf_grad[-1] - cdf_grad[0])
             
-        # 2. Uniform CDF
         cdf_linear = np.linspace(0, 1, len(density_array))
-        
-        # 3. Mix
-        cdf_final = (mix_ratio * cdf_grad) + ((1 - mix_ratio) * cdf_linear)
-        
-        return cdf_final
+        return (mix_ratio * cdf_grad) + ((1 - mix_ratio) * cdf_linear)
 
     cdf_M_final = get_hybrid_spacing(dens_M, COARSE_N, mix_ratio=0.7)
     cdf_T_final = get_hybrid_spacing(dens_T, COARSE_N, mix_ratio=0.7)
@@ -205,13 +262,8 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     M_range = np.interp(uniform_space, cdf_M_final, c_M)
     T_range = np.interp(uniform_space, cdf_T_final, c_T)
 
-    # 1E. Generate Final Mesh
     X, Y = np.meshgrid(M_range, T_range)
     Z = np.zeros_like(X)
-
-    # ==========================================
-    # --- PHASE 2: FINAL SURFACE CALCULATION ---
-    # ==========================================
 
     for i in range(X.shape[0]):
         for j in range(X.shape[1]):
@@ -235,22 +287,19 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         
     Z_smooth = gaussian_filter(Z, sigma=0.5)
     
-    # --- PLOTTING ---
     with plt.style.context('dark_background'):
         fig = plt.figure(figsize=(10, 7), facecolor='black') 
         ax = fig.add_subplot(111, projection='3d', facecolor='black')
 
         ls = LightSource(azdeg=270, altdeg=45)
         vmin, vmax = 0.1151, 0.72
-        my_cmap = create_gamma_cmap('RdYlBu_r', gamma=1.1)
+        my_cmap = create_premium_cmap('RdYlBu_r')
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
         
         rgb = ls.shade(Z_smooth, cmap=my_cmap, norm=norm, vert_exag=0.1)
         
-        # Added faint wireframe definition
         surf = ax.plot_surface(X, Y, Z_smooth, facecolors=rgb, cmap=my_cmap, 
-                               rcount=X.shape[0], 
-                               ccount=X.shape[1], 
+                               rcount=X.shape[0], ccount=X.shape[1], 
                                edgecolor='none', linewidth=0.2, alpha=0.85, 
                                shade=False, antialiased=True, zorder=1, rasterized=True)
                                
@@ -280,16 +329,19 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                 valid_needles += 1
                 is_above = iv_mkt >= iv_mod_exact
                 dot_zorder = 10 if is_above else 1
+                alpha_above = 0.85  # Keep these crisp
+                alpha_below = 1.0  # Make these very transparent
 
+                # 2. Assign based on the position relative to the surface
+                current_alpha = alpha_above if is_above else alpha_below
                 ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mod_exact, iv_mkt], 
                         color='white', linestyle='-', linewidth=0.8, alpha=0.65, zorder=dot_zorder)
                 lbl = 'Market IV' if valid_needles == 1 else ""
                 ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mkt], 
-                        marker='o', linestyle='None', color="#F0F0F0", markersize=4.62,
+                        marker='o', linestyle='None', color="#FFF176", markersize=4.62,
                         markerfacecolor='#F0F0F0', markeredgecolor='none', markeredgewidth=0.01,
-                        alpha=0.85, zorder=dot_zorder + 1, label=lbl)
+                        alpha=current_alpha, zorder=dot_zorder + 1, label=lbl)
                         
-        # --- AESTHETICS ---
         ax.dist = 11  
         ax.set_xlim(LOWER_M, UPPER_M)
         ax.set_ylim(UPPER_T, LOWER_T) 
@@ -318,11 +370,51 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             leg = ax.get_legend()
             for handle in leg.legend_handles:
                 handle.set_alpha(1)
-                
-        cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02, alpha=0.8)
+
+# --- THE REAL SOLUTION: PURE VIBRANT COLORBAR ---
+# --- THE REAL SOLUTION: HIGHLIGHT-MATCHED COLORBAR ---
+# --- THE VIBRANCY MATCH: KEEPING 0.67 RANGE ---
+        # 1. Get the raw values (stopping at 0.67 as per your function)
+# --- THE SATURATION MATCH: ENSURING VIBRANCY ---
+
+        # 1. Get raw colors (stopping at 0.67 as per your function)
+        cb_values = np.linspace(vmax, vmin, 256)
+        cb_base_colors = my_cmap(norm(cb_values)) 
+
+        # 2. Convert to HSV (Hue, Saturation, Value) to fix the chroma
+        # This is where we stop the 'muddy' look.
+        cb_hsv = mcolors.rgb_to_hsv(cb_base_colors[:, :3])
+        
+        # SATURATION BOOST: Force the saturation to stay high. 
+        # Lighting usually kills saturation; we are forcing it back in.
+        cb_hsv[:, 1] = np.clip(cb_hsv[:, 1] * 1.2, 0, 1) # Boost saturation by 20%
+        cb_hsv[:, 2] = np.clip(cb_hsv[:, 2] * 1.05, 0, 1) # Boost brightness by 10%
+        
+        # Convert back to RGB
+        cb_rgb_vibrant = mcolors.hsv_to_rgb(cb_hsv)
+
+        # 3. Apply the 'Overlay' shading logic manually
+        # This gives it the 'lit' look of the surface without the muddy shadows.
+        cb_rgba_final = np.zeros((256, 1, 4))
+        cb_rgba_final[:, 0, :3] = cb_rgb_vibrant
+        cb_rgba_final[:, 0, 3] = 0.85 # Sync alpha with surface
+
+        # --- 4. DRAW COLORBAR ---
+        cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02)
+        cbar.ax.clear()
+        
+        # Bilinear interpolation makes the color transition look expensive and smooth
+        cbar.ax.imshow(cb_rgba_final, aspect='auto', extent=[0, 1, vmin, vmax], 
+                       origin='upper', interpolation='bilinear')
+        
+        cbar.ax.set_rasterized(True) 
+        cbar.ax.xaxis.set_visible(False)
+        cbar.ax.set_frame_on(False)
+
+        # Professional Tick Styling
         cbar.locator = FixedLocator(np.arange(0.1, 0.8, 0.1))
         cbar.update_ticks()
-        cbar.ax.yaxis.set_tick_params(color="#D7D7D7", labelcolor="#D7D7D7", labelsize=10)
+        cbar.ax.yaxis.set_tick_params(color="#D7D7D7", labelcolor="#D7D7D7", labelsize=10, width=0.5)
         cbar.outline.set_visible(False)
         cbar.ax.set_title("Model IV", color="#D7D7D7", fontsize=10, pad=9)
         
@@ -331,17 +423,13 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         save_path_vector = f"{filename}_surface_FINAL.pdf"
         plt.savefig(save_path_vector, format='pdf', bbox_inches='tight',    
                     pad_inches=0.15, facecolor='black', dpi=800)
-        
-        print(f"-> Saved True Vector: {save_path_vector}")
 
 def main():
-    # Define how many of the most recent calibrations you want to plot
     num_to_plot = 2 
-    
     for i in range(num_to_plot):
         try:
             print(f"\n--- Processing Artifact {i+1} ---")
-            result = load_calibration_by_index(i) # Use the updated sorting above
+            result = load_calibration_by_index(i) 
             if result is None:
                 print(f"No file found for index {i}. Skipping.")
                 continue
