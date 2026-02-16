@@ -290,13 +290,13 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
 
     LOWER_M, UPPER_M = 0.685, 1.315                    
     LOWER_T, UPPER_T = 0.04, 1.5 
-    GRID_DENSITY =  150 # 550# 550 #80
+    GRID_DENSITY =  50 # 550# 550 #80
 
     print(f"-> Generating Surface for: {ticker}")
     print(f"   Model: {'Bates' if is_bates else 'Heston'}")
     print(f"   Calculating true gradient-based adaptive mesh...")
     
-    COARSE_N = 100 # 120 #80  150
+    COARSE_N = 50 # 120 #80  150
     c_M = np.linspace(LOWER_M, UPPER_M, COARSE_N)
     c_T = np.linspace(LOWER_T, UPPER_T, COARSE_N)
     cX, cY = np.meshgrid(c_M, c_T)
@@ -407,7 +407,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     
     # --- CHANGED: Stale Red Dot Styling ---
     # "#D90429"
-
+    lbl_trigger = False
     if market_options:
         plot_opts = [o for o in market_options 
                      if (LOWER_M <= (o.strike/S0) <= UPPER_M) and (LOWER_T <= o.maturity <= UPPER_T)]
@@ -442,6 +442,43 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             color_below =  "#2B1600"
             
             current_color = color_above if is_above else color_below
+            current_alpha = alpha_above if is_above else alpha_below
+            # 3. THE "CORE"
+            if is_above and not lbl_trigger:
+                lbl = 'Market IV'
+                lbl_trigger = True
+            else: 
+                lbl = ""
+            if is_above:
+                ax.plot([m_mkt], [t_mkt], [iv_mkt], 
+                        marker='o', linestyle='None', color=current_color, 
+                        markersize=4.62,
+                        markerfacecolor=current_color, markeredgecolor='none',
+                        alpha=current_alpha,       # Solid, no-nonsense core
+                        zorder=dot_zorder + 1, label=lbl)
+            is_spx = "SPX" in filename.upper()
+            condition1 = ((t_mkt < 0.06) & (m_mkt < 1.05 )&  (not is_spx) & (iv_mkt < 0.2656))
+            condition2 = ((t_mkt < 0.06) & (m_mkt < 1.03 )&  (is_spx) & (iv_mkt < 0.1205))
+            if condition1 | condition2: 
+                ax.plot([m_mkt], [t_mkt], [iv_mkt], 
+                    marker='o', linestyle='None', color="#FFE065", 
+                    markersize=4.62,
+                    markerfacecolor="#FFE065", markeredgecolor='none',
+                    alpha=alpha_above ,       # Solid, no-nonsense core
+                    zorder=dot_zorder + 1)
+                ax.plot([m_mkt+0.001], [t_mkt + 0.001], [iv_mkt - 0.004], 
+                        marker='o', linestyle='None', color="#140B00", 
+                        markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                        alpha=0.6,       # Effectively "punches" a hole in the blue surface
+                        zorder=9)
+                continue
+            if not is_above:
+                ax.plot([m_mkt], [t_mkt], [iv_mkt], 
+                            marker='o', linestyle='None', color=current_color, 
+                            markersize=4.62,
+                            markerfacecolor=current_color, markeredgecolor='none',
+                            alpha=current_alpha,       # Solid, no-nonsense core
+                            zorder=dot_zorder + 1)
 
             # 1. THE NEEDLE
             ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mod_exact, iv_mkt], 
@@ -463,14 +500,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                         alpha=0.5,       # Effectively "punches" a hole in the blue surface
                         zorder=9)
                 
-            current_alpha = alpha_above if is_above else alpha_below
-            # 3. THE "CORE"
-            ax.plot([m_mkt], [t_mkt], [iv_mkt], 
-                    marker='o', linestyle='None', color=current_color, 
-                    markersize=4.62,
-                    markerfacecolor=current_color, markeredgecolor='none',
-                    alpha=current_alpha,       # Solid, no-nonsense core
-                    zorder=dot_zorder + 1)
+
     ax.dist = 11  
     ax.set_xlim(LOWER_M, UPPER_M)
     ax.set_ylim(UPPER_T, LOWER_T) 
