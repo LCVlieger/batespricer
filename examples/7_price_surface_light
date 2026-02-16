@@ -1,45 +1,31 @@
 import json
-import pandas as pd
+import glob
+import os
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 import matplotlib.colors as mcolors
 from matplotlib.colors import LightSource
 from matplotlib.ticker import FixedLocator
-import glob
 import matplotlib.tri as mtri
-import os
 
 def create_premium_cmap_1():
     """
-    'Neon Surface' Colormap from your first script.
+    'Neon Surface' Colormap.
     """
-    colors = [
-        "#091D57",  # Slate Blue 
-        "#2B66BF",  # Professional Mid Blue 
-        "#2E88CD",  # Soft Sky Blue
-        "#9BDEF2",  # Pale Powder Blue 
-        "#C2ECF7"   # Frost White 
-    ]
+    colors = ["#091D57", "#2B66BF", "#2E88CD", "#9BDEF2", "#C2ECF7"]
     nodes = [0.0, 0.1, 0.45, 0.8, 1.0]
-    cmap = mcolors.LinearSegmentedColormap.from_list("NeonGold", list(zip(nodes, colors)))
-    # Handle version compatibility for cmap access
-    base = mpl.colormaps.get_cmap(cmap) if hasattr(mpl, 'colormaps') else cm.get_cmap(cmap)
-    
-    gamma = 0.8
-    N = 256
-    values = np.linspace(0, 0.75, N)
-    warped_values = values ** gamma 
-    new_colors = base(warped_values)
-    return mcolors.ListedColormap(new_colors, name='NeonGold_Warped')
+    return mcolors.LinearSegmentedColormap.from_list("NeonGold", list(zip(nodes, colors)))
 
 def visualize_price_surface_final(csv_file):
-    print(f"Generating Final High-Precision Plot from {csv_file}...")
+    filename = os.path.basename(csv_file).replace(".csv", "")
+    print(f"Generating Refined Triangulation for: {filename}...")
+    
     df = pd.read_csv(csv_file)
     
-    # 1. Load Metadata
+    # 1. Load Metadata for S0
     base_name = csv_file.replace("_prices.csv", "")
     json_file = f"{base_name}_meta.json"
     s0 = df['K'].median()
@@ -49,134 +35,132 @@ def visualize_price_surface_final(csv_file):
             s0 = meta['market']['S0']
     except Exception: pass
 
+    # --- 2. DATA NORMALIZATION ---
     df['Moneyness'] = df['K'] / s0
     df['Market_Rel'] = df['Market'] / s0
     df['Model_Rel'] = df['Model'] / s0
 
-    # 2. Setup Plot
-    fig = plt.figure(figsize=(10, 7), facecolor='white')
+    LOWER_M, UPPER_M = df['Moneyness'].min(), df['Moneyness'].max()
+    LOWER_T, UPPER_T = df['T'].min(), df['T'].max()
+
+    # --- 3. EXACT TRIANGULATION ---
+    tri = mtri.Triangulation(df['Moneyness'].values, df['T'].values)
+    z = df['Model_Rel'].values
+
+    # --- 4. MICRO-MESH REFINEMENT (Fixed for Exact Flat Planes) ---
+    # By explicitly using a LinearTriInterpolator, the subdivided micro-triangles 
+    # will lie EXACTLY on the flat planes of the original triangles. 
+    # No cubic bulging, no rounding, perfectly matching your wireframe!
+    refiner = mtri.UniformTriRefiner(tri)
+    linear_interp = mtri.LinearTriInterpolator(tri, z)
+    tri_refined, z_refined = refiner.refine_field(z, triinterpolator=linear_interp, subdiv=4)
+
+    # --- 5. SETUP PLOT ---
+    fig = plt.figure(figsize=(10, 7), facecolor='white') 
     ax = fig.add_subplot(111, projection='3d', facecolor='white')
     ax.computed_zorder = False
 
-    vmin, vmax = 0.0, (0.10145+0.003)
-    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    vmin, vmax = 0.0, 0.10445
     my_cmap = create_premium_cmap_1()
+    norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
+    ls = LightSource(azdeg=90, altdeg=45) #was 270
 
-    # =========================================================================
-    # THE LIGHTING: Native Trisurf with LightSource (Identical to Plot 1)
-    # =========================================================================
-    tri = mtri.Triangulation(df['Moneyness'].values, df['T'].values)
-    ls = LightSource(azdeg=270, altdeg=45)
-
-    # Trisurf natively handles the lightsource object for shading
+    # --- 6. PLOT SMOOTH SURFACE ---
+    # We plot the highly detailed refined mesh to catch the smooth light gradients
     surf = ax.plot_trisurf(
-        df['Moneyness'], df['T'], df['Model_Rel'], 
-        triangles=tri.triangles,
+        tri_refined.x, tri_refined.y, z_refined, 
+        triangles=tri_refined.triangles,
         cmap=my_cmap, norm=norm,
-        lightsource=ls, shade=True,  # EXACT LIGHTING TECHNIQUE
-        edgecolor='none', linewidth=0, alpha=0.85, 
-        antialiased=True, zorder=5 # Surface sits in middle z-order
+        lightsource=ls, shade=True, 
+        edgecolor='none', alpha=0.9, 
+        antialiased=True, zorder=3, rasterized=True
     )
 
-    # =========================================================================
-    # POINT PLOTTING: Exact Core/Halo/Needle Logic
-    # =========================================================================
-    for idx, row in df.iterrows():
-        m_mkt, t_mkt = row['Moneyness'], row['T']
-        iv_mkt = row['Market_Rel']
-        iv_mod_exact = row['Model_Rel']
-
-        is_above = iv_mkt >= iv_mod_exact
-        
-        # Color definitions from your professional IV plot
-        color_above = "#FFE065" 
-        color_below = "#2B1600"
-        current_color = color_above if is_above else color_below
-        
-        # Z-order: 10 for above, 1 for below the surface
-        dot_zorder = 10 if is_above else 1
-        current_alpha = 0.98 if is_above else 1.0
-
-        # 1. THE NEEDLE
-        ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [iv_mod_exact, iv_mkt], 
-                color=current_color, linestyle='-', linewidth=0.8, alpha=0.4, zorder=dot_zorder)
-
-        # 2. THE "SILENCING HALO" (Punch-Through for points below)
-        if not is_above:
-            # White halo layer to "delete" surface color
-            ax.plot([m_mkt], [t_mkt], [iv_mkt], 
-                    marker='o', linestyle='None', color="#322500FF", 
-                    markersize=4.62, markeredgecolor='none', 
-                    alpha=1.0, zorder=dot_zorder)
-            # Soften the void
-            ax.plot([m_mkt], [t_mkt], [iv_mkt], 
-                    marker='o', linestyle='None', color="#231D00", 
-                    markersize=4.62, markeredgecolor='none', 
-                    alpha=0.5, zorder=9)
-                
-        # 3. THE "CORE" DOT
-        ax.plot([m_mkt], [t_mkt], [iv_mkt], 
-                marker='o', linestyle='None', color=current_color, 
-                markersize=4.62, markerfacecolor=current_color, markeredgecolor='none',
-                alpha=current_alpha, zorder=dot_zorder + 2)
-
-    # =========================================================================
-    # THE VIBRANT COLORBAR (Pure HSV-Shifted Logic)
-    # =========================================================================
+    # --- 7. PLOT EXACT ORIGINAL WIREFRAME ON TOP ---
+    # We plot your EXACT original triangles with invisible faces and a visible grid
+    ax.plot_trisurf(
+        df['Moneyness'], df['T'], z, 
+        triangles=tri.triangles,
+        color=(1, 1, 1, 0), # Completely transparent faces
+        edgecolor="none",#(0.3, 0.3, 0.3, 0.23), # The cool grey grid lines
+        linewidth=0.4,
+        shade=False, antialiased=True, zorder=3
+    )
+                               
     m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
     m.set_array([])
     
-    cb_values = np.linspace(vmax, vmin, 256)
-    cb_base_colors = my_cmap(norm(cb_values)) 
-    cb_hsv = mcolors.rgb_to_hsv(cb_base_colors[:, :3])
-    cb_hsv[:, 1] = np.clip(cb_hsv[:, 1] * 1.2, 0, 1) # Saturate for vibrancy
-    cb_rgb_vibrant = mcolors.hsv_to_rgb(cb_hsv)
+    # --- 8. POINT STYLING ---
+    for _, row in df.iterrows():
+        m_mkt, t_mkt, rel_mkt, rel_mod = row['Moneyness'], row['T'], row['Market_Rel'], row['Model_Rel']
+        is_above = rel_mkt >= rel_mod
+        dot_zorder = 10 if is_above else 1
+        color_above, color_below = "#FFE065", "#2B1600"
+        current_color = color_above if is_above else color_below
 
-    cb_rgba_final = np.zeros((256, 1, 4))
-    cb_rgba_final[:, 0, :3] = cb_rgb_vibrant
-    cb_rgba_final[:, 0, 3] = 0.85 
+        ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [rel_mod, rel_mkt], 
+                color=current_color, linestyle='-', linewidth=0.8, alpha=0.4, zorder=dot_zorder)
 
-    cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.01)
-    cbar.ax.clear()
-    cbar.ax.imshow(cb_rgba_final, aspect='auto', extent=[0, 1, vmin, vmax], origin='upper')
-    
-    cbar.ax.set_rasterized(True)
-    cbar.ax.xaxis.set_visible(False)
-    cbar.ax.set_frame_on(False)
-    cbar.locator = FixedLocator([0.0, 0.02, 0.04, 0.06, 0.08, 0.10])
-    cbar.update_ticks()
-    cbar.ax.yaxis.set_tick_params(color="black", labelcolor="black", labelsize=10, width=0.5)
-    cbar.ax.set_title("Model / $S_0$", color="black", fontsize=10, pad=9)
+        if not is_above:
+            ax.plot([m_mkt], [t_mkt], [rel_mkt], 
+                        marker='o', linestyle='None', color="#322500FF", 
+                        markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                        alpha=1.0,       # Effectively "punches" a hole in the blue surface
+                        zorder=dot_zorder)
+            ax.plot([m_mkt], [t_mkt], [rel_mkt], 
+                        marker='o', linestyle='None', color="#231D00", 
+                        markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                        alpha=0.5,       # Effectively "punches" a hole in the blue surface
+                        zorder=9)
+            
+        ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', color=current_color, 
+                markersize=4.62, markerfacecolor=current_color, markeredgecolor='none',
+                alpha=0.98 if is_above else 1.0, zorder=dot_zorder + 1)
 
-    # =========================================================================
-    # STYLING & AXES
-    # =========================================================================
+    # --- 9. AXES & POLISH ---
     ax.dist = 11  
-    LOWER_M, UPPER_M = np.min(df['Moneyness']), np.max(df['Moneyness'])
-    LOWER_T, UPPER_T = 0.04, 1.1069
     ax.set_xlim(LOWER_M, UPPER_M)
     ax.set_ylim(LOWER_T, UPPER_T) 
     ax.set_zlim(0.0, vmax)
-    
-    grid_style = (0.68, 0.68, 0.68, 0.5) 
-    for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
-        axis.set_pane_color((0.95, 0.95, 0.95, 1.0)) 
-        axis.line.set_color("black")  
-        axis._axinfo["grid"].update({'color': grid_style, 'linewidth': 0.575})
+    ax.view_init(elev=28, azim=-115) 
 
-    ax.view_init(elev=30, azim=-120) 
     ax.set_xlabel('Moneyness ($K/S_0$)', color="black", labelpad=5, fontsize=11)
     ax.set_ylabel('Maturity ($T$ Years)', color="black", labelpad=5, fontsize=11)
-    ax.set_zlabel('Relative Price ($C/S_0$)', color="black", labelpad=6.75, fontsize=11)
+    ax.set_zlabel(r'Relative Price ($C/S_0$)', color="black", labelpad=6.75, fontsize=11)
+    
+    for axis in [ax.xaxis, ax.yaxis, ax.zaxis]:
+        axis.set_pane_color((0.95, 0.95, 0.95, 1.0)) 
+        axis._axinfo["grid"].update({'color': (0.68, 0.68, 0.68, 0.5), 'linewidth': 0.575})
 
-    fig.subplots_adjust(left=0.25, bottom=0.05, right=0.95, top=0.95)
+    scatter_above = ax.scatter([], [], color="#FFE065", label=r"Market $\geq$ Model", s=30)
+    scatter_below = ax.scatter([], [], color="#2B1600", label="Market < Model", s=30)
+    ax.legend(handles=[scatter_above, scatter_below], loc='upper left', bbox_to_anchor=(0.09935, 0.7774), 
+              frameon=True, facecolor=(0.95, 0.95, 0.95), labelcolor="black", edgecolor='none', fontsize=10)
 
-    # Save to PDF
-    save_path = csv_file.replace(".csv", "_relative_surface_FINAL.pdf")
-    plt.savefig(save_path, format='pdf', bbox_inches='tight', pad_inches=0.22, facecolor='white', dpi=600)
-    plt.show()
+    # --- 10. VIBRANT COLORBAR ---
+    cb_values = np.linspace(vmax, vmin, 256)
+    cb_base_colors = my_cmap(norm(cb_values)) 
+    cb_hsv = mcolors.rgb_to_hsv(cb_base_colors[:, :3])
+    cb_hsv[:, 1] = np.clip(cb_hsv[:, 1] * 1.2, 0, 1) 
+    cb_rgba_final = np.zeros((256, 1, 4))
+    cb_rgba_final[:, 0, :3] = mcolors.hsv_to_rgb(cb_hsv)
+    cb_rgba_final[:, 0, 3] = 0.85 
+
+    cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02)
+    cbar.ax.clear()
+    cbar.ax.imshow(cb_rgba_final, aspect='auto', extent=[0, 1, vmin, vmax], origin='upper', interpolation='bilinear')
+    cbar.ax.set_title("Model / $S_0$", color="black", fontsize=10, pad=9)
+    cbar.outline.set_visible(False)
+    cbar.locator = FixedLocator(np.arange(0.0, 0.12, 0.02))
+    cbar.update_ticks()
+
+    fig.subplots_adjust(top=0.98, bottom=0.02, left=0.02, right=0.98)
+
+    save_path = csv_file.replace(".csv", "_FINAL_TRIMESH.pdf")
+    plt.savefig(save_path, format='pdf', bbox_inches='tight', pad_inches=0.15, facecolor='white', dpi=800)
+    #plt.show()
 
 if __name__ == "__main__":
-    files = glob.glob("results/calibration_*_prices.csv") or glob.glob("calibration_*_prices.csv")
+    files = glob.glob("results/*_prices.csv") or glob.glob("*_prices.csv")
     for f in files:
         visualize_price_surface_final(f)
