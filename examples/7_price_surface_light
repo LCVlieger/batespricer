@@ -10,6 +10,9 @@ import matplotlib.colors as mcolors
 from matplotlib.colors import LightSource
 from matplotlib.ticker import FixedLocator
 import matplotlib.tri as mtri
+import matplotlib.path as mpath
+import matplotlib.transforms as mtransforms
+from mpl_toolkits.mplot3d import proj3d
 
 def create_premium_cmap_1():
     """
@@ -72,15 +75,11 @@ def visualize_price_surface_final(csv_file):
     ) | (
         (df['Market_Rel'] > 0.06304) & (df['Market_Rel'] < 0.063067)
     )
-  #np.abs(xs - spine_moneyness - 0.025) <= spine_tolerance
     
     # Tag all points that are exposed on the boundary or spine
     df['is_exposed'] = mask_c | mask_r | mask_l | mask_u | mask_d | mask_spine 
 
     # --- 4. MICRO-MESH REFINEMENT (Fixed for Exact Flat Planes) ---
-    # By explicitly using a LinearTriInterpolator, the subdivided micro-triangles 
-    # will lie EXACTLY on the flat planes of the original triangles. 
-    # No cubic bulging, no rounding, perfectly matching your wireframe!
     refiner = mtri.UniformTriRefiner(tri)
     linear_interp = mtri.LinearTriInterpolator(tri, z)
     tri_refined, z_refined = refiner.refine_field(z, triinterpolator=linear_interp, subdiv=4)
@@ -93,10 +92,9 @@ def visualize_price_surface_final(csv_file):
     vmin, vmax = 0.0, 0.10445
     my_cmap = create_premium_cmap_1()
     norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
-    ls = LightSource(azdeg=90, altdeg=45) #was 270
+    ls = LightSource(azdeg=90, altdeg=45) 
 
     # --- 6. PLOT SMOOTH SURFACE ---
-    # We plot the highly detailed refined mesh to catch the smooth light gradients
     surf = ax.plot_trisurf(
         tri_refined.x, tri_refined.y, z_refined, 
         triangles=tri_refined.triangles,
@@ -107,12 +105,11 @@ def visualize_price_surface_final(csv_file):
     )
 
     # --- 7. PLOT EXACT ORIGINAL WIREFRAME ON TOP ---
-    # We plot your EXACT original triangles with invisible faces and a visible grid
     ax.plot_trisurf(
         df['Moneyness'], df['T'], z, 
         triangles=tri.triangles,
-        color=(1, 1, 1, 0), # Completely transparent faces
-        edgecolor="none",#(0.3, 0.3, 0.3, 0.23), # The cool grey grid lines
+        color=(1, 1, 1, 0), 
+        edgecolor="none",
         linewidth=0.4,
         shade=False, antialiased=True, zorder=3
     )
@@ -120,27 +117,49 @@ def visualize_price_surface_final(csv_file):
     m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
     m.set_array([])
     
-    # --- 8. POINT STYLING (Boundary Below Graph Logic) ---
-# --- 8. POINT STYLING (Boundary Below Graph Logic) ---
-    for _, row in df.iterrows():
-        m_mkt, t_mkt, rel_mkt, rel_mod = row['Moneyness'], row['T'], row['Market_Rel'], row['Model_Rel']
-        
-        is_above = rel_mkt >= rel_mod
-        is_exposed = row['is_exposed']
-        
-        # Z-ORDER LOGIC: High if physically ABOVE the surface, low if BELOW.
-        dot_zorder = 10 if is_above else 1
-        
-        color_above, color_below = "#FFE065", "#2B1600"
-        
-# --- PRE-CALCULATE CENTER FOR THE INWARD SHIFT ---
+# =========================================================================
+    # --- PRE-CALCULATE SEMICIRCLE & CENTER FOR POINT STYLING ---
+    # =========================================================================
+    
+# =========================================================================
+    # --- PRE-CALCULATE SEMICIRCLE & CENTER FOR POINT STYLING ---
+    # =========================================================================
+# =========================================================================
+    # --- PRE-CALCULATE SEMICIRCLE & CENTER FOR POINT STYLING ---
+    # =========================================================================
+    import matplotlib.path as mpath
+    import matplotlib.transforms as mtransforms
+    from mpl_toolkits.mplot3d import proj3d
+
+    # 1. The Visible Right Half (Filled)
+    theta_right = np.linspace(-np.pi/2, np.pi/2, 30)
+    verts_right = np.column_stack([np.cos(theta_right), np.sin(theta_right)])
+    
+    # 2. The Invisible Left Half (Forces a perfectly stable, non-orbiting bounding box!)
+    theta_left = np.linspace(np.pi/2, 3*np.pi/2, 30)
+    verts_left = np.column_stack([np.cos(theta_left), np.sin(theta_left)])
+    
+    verts = np.vstack([[0, 0], verts_right, [0, 0], verts_left])
+    # LINETO draws the right half. MOVETO adds the left half to the bounds without drawing it.
+    codes = [mpath.Path.MOVETO] + [mpath.Path.LINETO] * 30 + [mpath.Path.CLOSEPOLY] + [mpath.Path.MOVETO] * 30
+    base_semicircle = mpath.Path(verts, codes)
+
     center_m = (LOWER_M + UPPER_M) / 2.0
     center_t = (LOWER_T + UPPER_T) / 2.0
-    span_m = UPPER_M - LOWER_M
-    span_t = UPPER_T - LOWER_T
 
     # --- 8. POINT STYLING (Boundary Below Graph Logic) ---
-    for _, row in df.iterrows():
+    # Notice we added 'enumerate' to get an exact index for our masks
+    # --- 8. POINT STYLING (Boundary Below Graph Logic) ---
+    # Notice we added 'enumerate' to strictly match our boundary masks!
+# =========================================================================
+    # --- 8. POINT STYLING (Boundary Below Graph Logic) ---
+    # =========================================================================
+    
+    # Calculate how many triangles every single point is attached to
+    node_triangle_counts = np.bincount(tri.triangles.flatten(), minlength=len(df))
+
+    for i, (_, row) in enumerate(df.iterrows()):
+            
         m_mkt, t_mkt, rel_mkt, rel_mod = row['Moneyness'], row['T'], row['Market_Rel'], row['Model_Rel']
         
         is_above = rel_mkt >= rel_mod
@@ -155,48 +174,80 @@ def visualize_price_surface_final(csv_file):
         ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [rel_mod, rel_mkt], 
                 color=line_color, linestyle='-', linewidth=0.8, alpha=0.4, zorder=dot_zorder)
 
-        # Draw the dark punch-through halos ONLY for hidden points
         if not is_above and not is_exposed:
+            # COMPLETELY HIDDEN
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', color="#322500FF", 
                     markersize=4.62, markeredgecolor='none', alpha=1.0, zorder=dot_zorder)
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', color="#231D00", 
                     markersize=4.62, markeredgecolor='none', alpha=0.5, zorder=9)
             
-            # Main hidden dot
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', 
                     markerfacecolor=color_below, markeredgecolor='none', markersize=4.62, alpha=1.0, zorder=dot_zorder)
 
         elif is_above:
-            # Main fully visible dot
+            # FULLY VISIBLE
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', 
                     markerfacecolor=color_above, markeredgecolor='none', markersize=4.62, alpha=0.98, zorder=dot_zorder)
-
         elif is_exposed:
-            # THE SHIFT METHOD (Boundary Below Graph)
+            # THE "ECLIPSE SHIFT" METHOD 
             
-            # 1. Base Gold Dot exactly at the point
+            # 1. Base Gold Dot (Always plotted)
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', 
-                    markerfacecolor=color_above, markeredgecolor='none', markersize=4.62, alpha=1.0, zorder=dot_zorder)
+                    markerfacecolor=color_above, markeredgecolor='none', 
+                    markersize=4.62, alpha=1.0, zorder=dot_zorder)
             
-            # 2. Calculate vector toward the center of the grid
-            dir_m = center_m - m_mkt
-            dir_t = center_t - t_mkt
-            dist = np.sqrt((dir_m/span_m)**2 + (dir_t/span_t)**2)
+            # 2. Determine pure INWARD direction
+            m_dir, t_dir = 0.0, 0.0
+            if mask_l[i]: m_dir = 1.0     
+            elif mask_r[i]: m_dir = -1.0  
             
-            # Tweak this multiplier to control how far inside the black dot shifts
-            shift_amount = 0.009 #012 
+            if mask_d[i]: t_dir = 1.0     
+            elif mask_u[i]: t_dir = -1.0  
             
-            if dist > 0:
-                m_shifted = m_mkt + (dir_m / dist) * shift_amount * span_m
-                t_shifted = t_mkt + (dir_t / dist) * shift_amount * span_t
-            else:
-                m_shifted, t_shifted = m_mkt, t_mkt
+            if m_dir == 0 and t_dir == 0:
+                center_m = (LOWER_M + UPPER_M) / 2.0
+                center_t = (LOWER_T + UPPER_T) / 2.0
+                m_dir = np.sign(center_m - m_mkt)
+                t_dir = np.sign(center_t - t_mkt)
                 
-            # 3. Masking Dark Dot shifted inward (plotted on top of gold, but under mesh)
-            ax.plot([m_shifted], [t_shifted], [rel_mkt], marker='o', linestyle='None', 
-                    markerfacecolor="#231D00", markeredgecolor='none', markersize=4.62, alpha=0.5, zorder=10)
+            m_shifted = m_mkt + (m_dir * span_x * 0.009)
+            t_shifted = t_mkt + (t_dir * span_y * 0.009)
+            
+            # =================================================================
+            # --- THE DISTANCE-TO-TRIANGLE FILTER ---
+            # =================================================================
+            tri_idx = finder(m_shifted, t_shifted)
+            
+            # If it strictly falls entirely outside the math hull
+            if tri_idx == -1:
+                continue
+                
+            # Grab the indices of the 3 corners of the triangle the shadow landed in
+            p0, p1, p2 = tri.triangles[tri_idx]
+            
+            # Calculate normalized distance from our shifted shadow to the 3 corners
+            d0 = np.hypot((xs[p0] - m_shifted) / span_x, (ys[p0] - t_shifted) / span_y)
+            d1 = np.hypot((xs[p1] - m_shifted) / span_x, (ys[p1] - t_shifted) / span_y)
+            d2 = np.hypot((xs[p2] - m_shifted) / span_x, (ys[p2] - t_shifted) / span_y)
+            
+            # If the closest corner of this triangle is really far away (> 6% of graph width),
+            # it means this is a massive, invisible ghost triangle in empty space!
+            distance_threshold = 0.02 # Tweak this up or down if it's too aggressive/lenient
+            is_spx = "SPX" in filename.upper()
+            # Create a boolean mask
+            condition = (max(d0, d1, d2) < distance_threshold) | \
+                        ((row['Moneyness'] > 1.022) & (row['Market_Rel'] < 1.024) & (row['T'] < 0.06) & is_spx)
 
-    # --- 9. AXES & POLISH ---
+            if condition.any(): 
+                continue
+            
+            if ((row['Moneyness'] > 1.022) & (row['Market_Rel'] < 1.024) & (row['T'] < 0.06) & (not is_spx)):
+                m_shifted = m_shifted + 0.005
+            # 3. Masking Dark Dot (Only plotted if it landed inside a REAL, dense triangle)
+            ax.plot([m_shifted], [t_shifted], [rel_mkt], marker='o', linestyle='None', 
+                    markerfacecolor="#231D00", markeredgecolor='none', 
+                    markersize=4.8, alpha=0.5, zorder=9)
+
     ax.dist = 11  
     ax.set_xlim(LOWER_M, UPPER_M)
     ax.set_ylim(LOWER_T, UPPER_T) 
@@ -218,6 +269,7 @@ def visualize_price_surface_final(csv_file):
     for h in leg.legendHandles:
         h.set_edgecolor("black")
         h.set_linewidth(0.1)
+        
     # --- 10. VIBRANT COLORBAR ---
     cb_values = np.linspace(vmax, vmin, 256)
     cb_base_colors = my_cmap(norm(cb_values)) 
