@@ -290,13 +290,13 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
 
     LOWER_M, UPPER_M = 0.685, 1.315                    
     LOWER_T, UPPER_T = 0.04, 1.5 
-    GRID_DENSITY =  200 # 550# 550 #80
+    GRID_DENSITY =  120 #250 #250 # 550# 550 #80
 
     print(f"-> Generating Surface for: {ticker}")
     print(f"   Model: {'Bates' if is_bates else 'Heston'}")
     print(f"   Calculating true gradient-based adaptive mesh...")
     
-    COARSE_N = 100 #80 # 120 #80  150
+    COARSE_N =  50 #150#150  #80 # 120 #80  150
     c_M = np.linspace(LOWER_M, UPPER_M, COARSE_N)
     c_T = np.linspace(LOWER_T, UPPER_T, COARSE_N)
     cX, cY = np.meshgrid(c_M, c_T)
@@ -376,7 +376,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         Z = pd.DataFrame(Z).interpolate(method='linear', axis=1, limit_direction='both') \
                            .interpolate(method='linear', axis=0, limit_direction='both').values
         
-    Z_smooth = gaussian_filter(Z, sigma=0.5)
+    Z_smooth = gaussian_filter(Z, sigma=0)
     
     def create_gamma_cmap(base_cmap_name, gamma=0.5):
         base = cm.get_cmap(base_cmap_name)
@@ -395,16 +395,16 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
     my_cmap = create_premium_cmap_1()
     norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
     
-    rgb = ls.shade(Z_smooth, cmap=my_cmap, norm=norm, vert_exag=0.1)
+    #rgb = ls.shade(Z_smooth, cmap=my_cmap, norm=norm, vert_exag=0.1)
     
-    surf = ax.plot_surface(X, Y, Z_smooth, facecolors=rgb, cmap=my_cmap, 
-                           rcount=X.shape[0], ccount=X.shape[1], 
+    surf = ax.plot_surface(X, Y, Z_smooth, cmap=my_cmap, 
+                           rcount=X.shape[0], ccount=X.shape[1], lightsource=ls, norm=norm,
                            edgecolor='none', linewidth=0.2, alpha=0.85, 
-                           shade=False, antialiased=True, zorder=1, rasterized=True)
+                           shade=True, antialiased=True, zorder=1, rasterized=True)
                                
     m = cm.ScalarMappable(cmap=my_cmap, norm=norm)
     m.set_array([])
-    
+    markersize = 5.2
     # --- CHANGED: Stale Red Dot Styling ---
     # "#D90429"
     lbl_trigger = False
@@ -436,7 +436,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
  # --- COLOR DEFINITIONS ---
  # --- COLOR DEFINITIONS (No Glow) ---
             # Above: A clean, solid "International Orange" that pops against light blue
-            color_above = "#FFE065" #"#FFDD6B" "#FFE065"
+            color_above = "#E8DBA6"#"#winner: F5E5A8"  winner: "#F3E5AB""#FFE065" #"#FFDD6B" "#FFE065" "#F2E2A4" "#EFE0A5""#EADCA6" "#E8DBA6" 
             # Below: A very dark "Prussian Blue" or "Charcoal" 
             # This provides the best contrast against the light blue surface from underneath
             color_below =  "#2B1600"
@@ -452,7 +452,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             if is_above:
                 ax.plot([m_mkt], [t_mkt], [iv_mkt], 
                         marker='o', linestyle='None', color=current_color, 
-                        markersize=4.62,
+                        markersize=markersize, #4.62
                         markerfacecolor=current_color, markeredgecolor='none',
                         alpha=current_alpha,       # Solid, no-nonsense core
                         zorder=dot_zorder + 1, label=lbl)
@@ -463,22 +463,22 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             condition2b = ((iv_mkt < 0.22) & (iv_mkt > 0.18) & (m_mkt < 1 )& (t_mkt < 0.1) &  (is_spx) & (not is_above))
             if condition1a | condition1b |  condition2a | condition2b: 
                 ax.plot([m_mkt], [t_mkt], [iv_mkt], 
-                    marker='o', linestyle='None', color="#FFE065", 
-                    markersize=4.62,
-                    markerfacecolor="#FFE065", markeredgecolor='none',
+                    marker='o', linestyle='None', color=color_above, 
+                    markersize=markersize,
+                    markerfacecolor=color_above, markeredgecolor='none',
                     alpha=alpha_above ,       # Solid, no-nonsense core
                     zorder=dot_zorder + 1)
                 if condition1a or condition2a: 
                     ax.plot([m_mkt+0.001], [t_mkt + 0.001], [iv_mkt - 0.004], 
                             marker='o', linestyle='None', color="#140B00", 
-                            markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                            markersize=markersize, markeredgecolor='none', # Slightly larger than the core
                             alpha=0.6,       # Effectively "punches" a hole in the blue surface
                             zorder=9)
                     continue
                 if condition1b: 
                     ax.plot([m_mkt+0.001], [t_mkt + 0.005], [iv_mkt - 0.004], 
                             marker='o', linestyle='None', color="#140B00", 
-                            markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                            markersize=markersize, markeredgecolor='none', # Slightly larger than the core
                             alpha=0.6,       # Effectively "punches" a hole in the blue surface
                             zorder=9)
                     continue
@@ -488,7 +488,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             if not is_above:
                 ax.plot([m_mkt], [t_mkt], [iv_mkt], 
                             marker='o', linestyle='None', color=current_color, 
-                            markersize=4.62,
+                            markersize=markersize,
                             markerfacecolor=current_color, markeredgecolor='none',
                             alpha=current_alpha,       # Solid, no-nonsense core
                             zorder=dot_zorder + 1)
@@ -506,12 +506,12 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
             if not is_above:
                 ax.plot([m_mkt], [t_mkt], [iv_mkt], 
                         marker='o', linestyle='None', color="#322500FF", 
-                        markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                        markersize=markersize, markeredgecolor='none', # Slightly larger than the core
                         alpha=1.0,       # Effectively "punches" a hole in the blue surface
                         zorder=dot_zorder)
                 ax.plot([m_mkt], [t_mkt], [iv_mkt], 
                         marker='o', linestyle='None', color="#231D00", 
-                        markersize=4.62, markeredgecolor='none', # Slightly larger than the core
+                        markersize=markersize, markeredgecolor='none', # Slightly larger than the core
                         alpha=0.5,       # Effectively "punches" a hole in the blue surface
                         zorder=9)
                 
@@ -542,7 +542,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
 
     if market_options and valid_needles > 0:
         # CHANGED: Legend styling to match light theme
-        scatter_above = ax.scatter([], [], color="#FFE065", label=r"Market IV", s=30)
+        scatter_above = ax.scatter([], [], color=color_above, label=r"Market IV", s=30)
         leg = ax.legend(handles = [scatter_above], loc='upper left', bbox_to_anchor=(0.175, 0.79), frameon=True, 
                   facecolor=(0.95, 0.95, 0.95), labelcolor="black", handletextpad=0.5, edgecolor='none', fontsize=10)
         for h in leg.legendHandles:

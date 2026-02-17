@@ -167,7 +167,7 @@ def visualize_price_surface_final(csv_file):
         
         # Z-ORDER LOGIC
         dot_zorder = 10 if is_above else 1
-        color_above, color_below = "#FFE065", "#231D00"
+        color_above, color_below ="#E8DBA6","#231D00"  #"#F3E5AB" ,"#231D00"  # "#FFE065", "#231D00"
 
         # Draw the drop-lines
         line_color = color_above if (is_above or is_exposed) else color_below
@@ -175,28 +175,28 @@ def visualize_price_surface_final(csv_file):
         current_color_needle = "white" if (is_above or is_exposed) else color_below
         ax.plot([m_mkt, m_mkt], [t_mkt, t_mkt], [rel_mod, rel_mkt], 
                 color=current_color_needle, linestyle='-', linewidth=0.8, alpha=alpha, zorder=dot_zorder)
-
+        markersize = 5.2
         if not is_above and not is_exposed:
             # COMPLETELY HIDDEN
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', color="#231D00", 
-                    markersize=4.62, markeredgecolor='none', alpha=1.0, zorder=dot_zorder)
+                    markersize=markersize, markeredgecolor='none', alpha=1.0, zorder=dot_zorder)
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', color="#231D00", 
-                    markersize=4.62, markeredgecolor='none', alpha=0.5, zorder=9)
+                    markersize=markersize, markeredgecolor='none', alpha=0.5, zorder=9)
             
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', 
-                    markerfacecolor=color_below, markeredgecolor='none', markersize=4.62, alpha=1.0, zorder=dot_zorder)
+                    markerfacecolor=color_below, markeredgecolor='none', markersize=markersize, alpha=1.0, zorder=dot_zorder)
 
         elif is_above:
             # FULLY VISIBLE
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', 
-                    markerfacecolor=color_above, markeredgecolor='none', markersize=4.62, alpha=0.98, zorder=dot_zorder)
+                    markerfacecolor=color_above, markeredgecolor='none', markersize=markersize, alpha=0.98, zorder=dot_zorder)
         elif is_exposed:
             # THE "ECLIPSE SHIFT" METHOD 
             
             # 1. Base Gold Dot (Always plotted)
             ax.plot([m_mkt], [t_mkt], [rel_mkt], marker='o', linestyle='None', 
                     markerfacecolor=color_above, markeredgecolor='none', 
-                    markersize=4.62, alpha=1.0, zorder=dot_zorder)
+                    markersize=markersize, alpha=1.0, zorder=dot_zorder)
             
             # 2. Determine pure INWARD direction
             m_dir, t_dir = 0.0, 0.0
@@ -248,7 +248,7 @@ def visualize_price_surface_final(csv_file):
             # 3. Masking Dark Dot (Only plotted if it landed inside a REAL, dense triangle)
             ax.plot([m_shifted], [t_shifted], [rel_mkt], marker='o', linestyle='None', 
                     markerfacecolor="#231D00", markeredgecolor='none', 
-                    markersize=4.8, alpha=0.5, zorder=9)
+                    markersize=markersize, alpha=0.5, zorder=9)
 
     ax.dist = 11  
     ax.set_xlim(LOWER_M, UPPER_M)
