@@ -511,7 +511,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
                     continue
                 if condition1b: 
                     ax.plot([m_mkt+0.001], [t_mkt + 0.005], [iv_mkt - 0.004], 
-                            marker='o', linestyle='None', color="#140B00", 
+                            marker='o', linestyle='None', color="#483700", 
                             markersize=markersize, markeredgecolor='none', # Slightly larger than the core
                             alpha=0.6,       # Effectively "punches" a hole in the blue surface
                             zorder=9)
@@ -579,7 +579,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
         # CHANGED: Legend styling to match light theme
         scatter_above = ax.scatter([], [], color=color_above, label=r"Market IV", s=30)
         leg = ax.legend(handles = [scatter_above], loc='upper left', bbox_to_anchor=(0.175, 0.79), frameon=True, 
-                  facecolor=(0.95, 0.95, 0.95), labelcolor="black", handletextpad=0.5, edgecolor='none', fontsize=13)
+                  facecolor=(0.95, 0.95, 0.95), labelcolor="black", handletextpad=0.5, edgecolor='none', fontsize=13, framealpha=1.0)
         for h in leg.legendHandles:
             h.set_edgecolor("black")
             h.set_linewidth(0.01)
@@ -599,7 +599,7 @@ def plot_surface_professional(S0, r_curve, q_curve, params, ticker, filename, ma
 
     cb_rgba_final = np.zeros((256, 1, 4))
     cb_rgba_final[:, 0, :3] = cb_rgb_vibrant
-    cb_rgba_final[:, 0, 3] = 0.85 
+    cb_rgba_final[:, 0, 3] = 1
 
     cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02)
     cbar.ax.clear()

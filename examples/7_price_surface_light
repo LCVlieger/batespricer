@@ -304,7 +304,7 @@ def visualize_price_surface_final(csv_file):
     scatter_above = ax.scatter([], [], color="#ECE7D3", label=r"Market / $S_0$", s=30)
     scatter_below = ax.scatter([], [], color="#2B1600", label="Market < Model", s=30)
     leg = ax.legend(handles=[scatter_above], loc='upper left', bbox_to_anchor=(0.07935, 0.7785), 
-              frameon=True, facecolor=(0.95, 0.95, 0.95), labelcolor="black", edgecolor='none', fontsize=13)
+              frameon=True, facecolor=(0.95, 0.95, 0.95), labelcolor="black", edgecolor='none', fontsize=13 , framealpha=1.0)
     ax.tick_params(axis='z', which='major', pad=6)
     ax.tick_params(axis='x', which='major', pad=-1)
     for h in leg.legendHandles:
@@ -319,7 +319,7 @@ def visualize_price_surface_final(csv_file):
     cb_hsv[:, 1] = np.clip(cb_hsv[:, 1] * 1.2, 0, 1) 
     cb_rgba_final = np.zeros((256, 1, 4))
     cb_rgba_final[:, 0, :3] = mcolors.hsv_to_rgb(cb_hsv)
-    cb_rgba_final[:, 0, 3] = 0.85 
+    cb_rgba_final[:, 0, 3] = 1
 
     cbar = fig.colorbar(m, ax=ax, shrink=0.5, aspect=15, pad=-0.02)
     cbar.ax.clear()
