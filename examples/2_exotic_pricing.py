@@ -3,10 +3,10 @@ import glob
 import os
 import numpy as np
 import pandas as pd
-from heston_pricer.market import MarketEnvironment
-from heston_pricer.models.process import HestonProcess
-from heston_pricer.models.mc_pricer import MonteCarloPricer
-from heston_pricer.instruments import BarrierOption, BarrierType, AsianOption, OptionType
+from batespricer.market import MarketEnvironment
+from batespricer.models.process import HestonProcess
+from batespricer.models.mc_pricer import MonteCarloPricer
+from batespricer.instruments import BarrierOption, BarrierType, AsianOption, OptionType
 
 def load_calibration():
     patterns = [

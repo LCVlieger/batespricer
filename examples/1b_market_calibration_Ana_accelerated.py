@@ -6,9 +6,9 @@ import pandas as pd
 import yfinance as yf
 from datetime import datetime
 from scipy.optimize import least_squares
-from heston_pricer.calibration import BatesCalibratorFast
-from heston_pricer.analytics import BatesAnalyticalPricer, implied_volatility
-from heston_pricer.data import (
+from batespricer.calibration import BatesCalibratorFast
+from batespricer.analytics import BatesAnalyticalPricer, implied_volatility
+from batespricer.data import (
     fetch_treasury_rates_fred, fetch_raw_data, fetch_options, 
     get_market_implied_spot, ImpliedDividendCurve, 
     save_options_to_cache, load_options_from_cache

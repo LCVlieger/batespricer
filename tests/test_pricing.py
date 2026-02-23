@@ -1,10 +1,10 @@
 import pytest
 import numpy as np
-from heston_pricer.market import MarketEnvironment
-from heston_pricer.instruments import EuropeanOption, AsianOption, OptionType
-from heston_pricer.models.process import BlackScholesProcess
-from heston_pricer.models.mc_pricer import MonteCarloPricer
-from heston_pricer.analytics import BlackScholesPricer
+from batespricer.market import MarketEnvironment
+from batespricer.instruments import EuropeanOption, AsianOption, OptionType
+from batespricer.models.process import BlackScholesProcess
+from batespricer.models.mc_pricer import MonteCarloPricer
+from batespricer.analytics import BlackScholesPricer
 
 @pytest.fixture
 def default_market():
