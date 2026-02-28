@@ -1,0 +1,5 @@
+[
+  "tests/test_pricing.py::test_asian_call_approximation",
+  "tests/test_pricing.py::test_european_call_convergence",
+  "tests/test_pricing.py::test_put_call_parity"
+]

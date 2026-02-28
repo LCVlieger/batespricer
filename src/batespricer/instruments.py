@@ -30,30 +30,42 @@ class BarrierType(Enum):
     DOWN_AND_IN = 2
     UP_AND_OUT = 3
     UP_AND_IN = 4
-
 class BarrierOption(Option):
     def __init__(self, K: float, T: float, barrier: float, barrier_type: BarrierType, option_type: OptionType):
         super().__init__(K, T, option_type)
         self.barrier, self.barrier_type = barrier, barrier_type
 
-    def payoff(self, prices: np.ndarray) -> np.ndarray:
-        S_T, phi = prices[:, -1], self.option_type.value
-        payoff = np.maximum(phi * (S_T - self.K), 0)
-        
-        p_min, p_max = np.min(prices, axis=1), np.max(prices, axis=1)
-        
-        if self.barrier_type == BarrierType.DOWN_AND_OUT:
-            mask = p_min > self.barrier
-        elif self.barrier_type == BarrierType.DOWN_AND_IN:
-            mask = p_min <= self.barrier
-        elif self.barrier_type == BarrierType.UP_AND_OUT:
-            mask = p_max < self.barrier
-        elif self.barrier_type == BarrierType.UP_AND_IN:
-            mask = p_max >= self.barrier
+    def payoff(self, paths: np.ndarray, epsilon: float = None) -> np.ndarray:
+        if self.option_type == OptionType.CALL:
+            vanilla_payoff = np.maximum(paths[:, -1] - self.K, 0)
         else:
-            return payoff
+            vanilla_payoff = np.maximum(self.K - paths[:, -1], 0)
             
-        return payoff * mask
+        if self.barrier_type == BarrierType.DOWN_AND_OUT:
+            min_S = np.min(paths, axis=1)
+            if epsilon is None:
+                survived = np.where(min_S > self.barrier, 1.0, 0.0)                
+            else:
+                buffer_size = 3.0 * epsilon
+                x = np.clip((min_S - self.barrier) / buffer_size, 0.0, 1.0)
+                survived = (3 * x**2) - (2 * x**3)
+                
+            return vanilla_payoff * survived
+            
+        elif self.barrier_type == BarrierType.DOWN_AND_IN:
+            min_S = np.min(paths, axis=1)
+            if epsilon is None:
+                survived = np.where(min_S <= self.barrier, 1.0, 0.0)
+            else:
+                buffer_size = 3.0 * epsilon
+                x = np.clip((min_S - self.barrier) / buffer_size, 0.0, 1.0)
+                survived = 1.0 - ((3 * x**2) - (2 * x**3))
+                
+            return vanilla_payoff * survived
+            
+        else:
+            raise NotImplementedError("Only Down-and-Out and Down-and-In are supported")
+
     
 @dataclass
 class MarketOption:

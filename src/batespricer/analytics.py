@@ -70,7 +70,7 @@ class BatesAnalyticalPricerFast:
     @staticmethod
     def price_vectorized(S0, K, T, r, q, types, kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j, silent=True):
         K, T, r, q, types = map(np.atleast_1d, [K, T, r, q, types])
-        N_nodes, u_max = 126, 300.0
+        N_nodes, u_max = 250, 500 #126, 300.0
         nodes, weights = leg.leggauss(N_nodes)
         u, du = 0.5 * u_max * (nodes + 1), 0.5 * u_max * weights
         u = np.maximum(u, 1e-12)

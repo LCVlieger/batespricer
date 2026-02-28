@@ -1,0 +1,9 @@
+Metadata-Version: 2.4
+Name: heston_model
+Version: 1.1.0
+Summary: "High-Performance Heston Calibration & Pricing Engine
+Requires-Dist: numpy
+Requires-Dist: scipy
+Requires-Dist: numba
+Requires-Dist: matplotlib
+Requires-Dist: pytest

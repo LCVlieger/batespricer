@@ -4,7 +4,7 @@ from typing import List, Dict, Tuple
 from scipy.optimize import minimize
 from scipy.stats import norm
 from numba import njit, prange
-from .analytics import BatesAnalyticalPricer
+from .analytics import BatesAnalyticalPricer, BatesAnalyticalPricerFast
 from .models.mc_kernels import generate_bates_paths_crn, generate_bates_qe_slices_crn
 
 @njit(parallel=True, fastmath=True)
@@ -42,7 +42,7 @@ class BatesCalibrator:
         d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         return S * np.exp(-q * T) * norm.pdf(d1) * np.sqrt(T)
 
-    def calibrate(self, options: List, sigma_cap=2.0) -> Dict:
+    def calibrate(self, options: List, sigma_cap=2.0, model="Bates") -> Dict:
         strikes = np.array([o.strike for o in options])
         mats = np.array([o.maturity for o in options])
         mkt_p = np.array([o.market_price for o in options])
@@ -50,25 +50,166 @@ class BatesCalibrator:
         rv, qv = np.array([self.r_curve.get_rate(t) for t in mats]), np.array([self.q_curve.get_rate(t) for t in mats])
         
         atm_vegas = {T: self._bs_vega(self.S0, self.S0, T, self.r_curve.get_rate(T), self.q_curve.get_rate(T)) for T in np.unique(mats)}
-        vegas = np.array([max(self._bs_vega(self.S0, s, t, r, q), 0.05 * atm_vegas[t]) for s, t, r, q in zip(strikes, mats, rv, qv)])
+        #vegas = np.array([max(self._bs_vega(self.S0, s, t, r, q), 0.05 * atm_vega_map[t]) for s, t, r, q in zip(strikes, mats, rv, qv)])
         weights = self._get_weights(options, sigma_cap)
+
+        if model == "Bates":
+            x0 = [1.5, 0.25, 0.6, -0.2, 0.21, 0.5, -0.05, 0.2]
+            bnds = [(0.1, 10.), (0.001, 0.5), (0.01, 5.0), (-0.99, 0.0), (0.001, 0.5), (0.0, 5.0), (-0.5, 0.5), (0.01, 0.5)]
+        elif model == "Heston":
+            x0 = [1.5, 0.25, 0.6, -0.2, 0.21]
+            bnds = [(0.1, 10.), (0.001, 0.5), (0.01, 5.0), (-0.99, 0.0), (0.001, 0.5)]
+        elif model == "BS":
+            x0 = [0.21]
+            bnds = [(0.001, 0.5)]
 
         def obj(p):
             try:
-                mod_p = BatesAnalyticalPricer.price_vectorized(self.S0, strikes, mats, rv, qv, types, *p)
+                if model == "Bates": full_p = p
+                elif model == "Heston": full_p = [p[0], p[1], p[2], p[3], p[4], 0.0, 0.0, 0.0]
+                elif model == "BS": full_p = [1e-4, p[0], 1e-4, 0.0, p[0], 0.0, 0.0, 0.0]
+                mod_p = BatesAnalyticalPricer.price_vectorized(self.S0, strikes, mats, rv, qv, types, *full_p)
                 if np.any(np.isnan(mod_p)) or np.any(mod_p < 0): return 1e10
                 return np.sqrt(np.mean(((mod_p - mkt_p) * weights)**2))
             except: return 1e12
 
-        x0 = [1.5, 0.25, 0.6, -0.2, 0.21, 0.5, -0.05, 0.2]
-        bnds = [(0.1, 10.), (0.001, 0.5), (0.01, 5.0), (-0.99, 0.0), (0.001, 0.5), (0.0, 5.0), (-0.5, 0.5), (0.01, 0.5)]
-        
-        res = minimize(obj, x0, method='L-BFGS-B', bounds=bnds, tol=1e-8, options={'eps': 1e-4, 'maxiter': 500})
-        final_p = BatesAnalyticalPricer.price_vectorized(self.S0, strikes, mats, rv, qv, types, *res.x)
-        
-        return {**dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], res.x)), 
-                "weighted_obj": res.fun, "rmse": np.sqrt(np.mean((final_p - mkt_p)**2))}
+        def callback(xk):
+            w_obj = obj(xk)
+            if model == "Bates":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
+            elif model == "Heston":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
+            elif model == "BS":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
 
+        res = minimize(obj, x0, method='L-BFGS-B', bounds=bnds, callback=callback, tol=1e-8, options={'eps': 1e-4, 'maxiter': 500})
+        
+        if model == "Bates": final_prms = res.x
+        elif model == "Heston": final_prms = [res.x[0], res.x[1], res.x[2], res.x[3], res.x[4], 0.0, 0.0, 0.0]
+        elif model == "BS": final_prms = [1e-4, res.x[0], 1e-4, 0.0, res.x[0], 0.0, 0.0, 0.0]
+
+        final_p = BatesAnalyticalPricer.price_vectorized(self.S0, strikes, mats, rv, qv, types, *final_prms)
+        
+        return {**dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], final_prms)), 
+                "weighted_obj": res.fun, "rmse": np.sqrt(np.mean((final_p - mkt_p)**2))}
+    
+class BatesCalibratorFast:
+    """
+    Calibrates Bates (Heston + Jumps) model parameters using L-BFGS-B optimization.
+    Wired to use the ultra-fast Cached Gauss-Legendre pricer.
+    """
+    
+    def __init__(self, S0, r_curve, q_curve):
+        self.S0 = S0
+        self.r_curve = r_curve
+        self.q_curve = q_curve
+
+    def _calculate_robust_weights(self, options, sigma_cap=2.0):
+        spreads = np.array([max(abs(o.ask - o.bid), 0.01) for o in options])
+        raw_weights = 1.0 / spreads 
+        
+        mu = np.mean(raw_weights)
+        std = np.std(raw_weights)
+        cap_value = mu + sigma_cap * std
+        
+        return np.clip(raw_weights, a_min=None, a_max=cap_value)
+
+    def _calculate_bs_vega(self, S, K, T, r, q, sigma=0.25):
+        if T <= 1e-6 or sigma <= 1e-6: return 0.0
+        d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        return S * np.exp(-q * T) * norm.pdf(d1) * np.sqrt(T)
+
+    def calibrate(self, options, sigma_cap=2.0, model="Bates"):
+        strikes = np.array([o.strike for o in options])
+        maturities = np.array([o.maturity for o in options])
+        market_prices = np.array([o.market_price for o in options])
+        types = np.array([o.option_type for o in options])
+        r_vec = np.array([self.r_curve.get_rate(t) for t in maturities])
+        q_vec = np.array([self.q_curve.get_rate(t) for t in maturities])
+        
+        vegas = []
+        unique_Ts = np.unique(maturities)
+        atm_vega_map = {T: self._calculate_bs_vega(self.S0, self.S0, T, self.r_curve.get_rate(T), self.q_curve.get_rate(T), 0.25) for T in unique_Ts}
+
+        for i in range(len(options)):
+            T = maturities[i]
+            opt_vega = self._calculate_bs_vega(self.S0, strikes[i], T, r_vec[i], q_vec[i], 0.25)
+            robust_vega = max(opt_vega, 0.05 * atm_vega_map[T])
+            vegas.append(robust_vega)
+        
+        vegas = np.array(vegas)
+        spread_weights = self._calculate_robust_weights(options, sigma_cap)
+
+        if model == "Bates":
+            bounds = [(0.1, 10.0), (0.001, 0.5), (0.01, 5.0), (-0.99, 0.0), (0.001, 0.5), (0.0, 5.0), (-0.5, 0.5), (0.01, 0.5)]
+            x0 = [1.5, 0.25, 0.6, -0.2, 0.21, 0.5, -0.05, 0.2]
+        elif model == "Heston":
+            bounds = [(0.1, 10.0), (0.001, 0.5), (0.01, 5.0), (-0.99, 0.0), (0.001, 0.5)]
+            x0 = [1.5, 0.25, 0.6, -0.2, 0.21]
+        elif model == "BS":
+            bounds = [(0.001, 0.5)]
+            x0 = [0.21]
+        
+        def objective(p):
+            try:
+                if model == "Bates":
+                    kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j = p
+                elif model == "Heston":
+                    kappa, theta, xi, rho, v0 = p
+                    lamb, mu_j, sigma_j = 0.0, 0.0, 0.0
+                elif model == "BS":
+                    v0 = p[0]
+                    kappa, theta, xi, rho, lamb, mu_j, sigma_j = 1e-4, v0, 1e-4, 0.0, 0.0, 0.0, 0.0
+
+                model_p = BatesAnalyticalPricerFast.price_vectorized(
+                    self.S0, strikes, maturities, r_vec, q_vec, types,
+                    kappa, theta, xi, rho, v0, lamb, mu_j, sigma_j, silent=True
+                )
+                
+                if np.any(np.isnan(model_p)) or np.any(model_p < 0):
+                    return 1e10 
+                raw_diff = (model_p - market_prices)
+                weighted_diff = (raw_diff * spread_weights) 
+                
+                return np.sqrt(np.mean(weighted_diff**2)) 
+            except: 
+                return 1e12
+            
+        def callback(xk):
+            w_obj = objective(xk)
+            if model == "Bates":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | "
+                      f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}| "
+                      f"L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
+            elif model == "Heston":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | "
+                      f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
+            elif model == "BS":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
+
+        res = minimize(
+            objective, 
+            x0, 
+            method='L-BFGS-B',
+            bounds=bounds, 
+            callback=callback, 
+            tol=1e-8, 
+            options={'eps': 1e-4, 'maxiter': 500} 
+        )
+
+        if model == "Bates": final_prms = res.x
+        elif model == "Heston": final_prms = [res.x[0], res.x[1], res.x[2], res.x[3], res.x[4], 0.0, 0.0, 0.0]
+        elif model == "BS": final_prms = [1e-4, res.x[0], 1e-4, 0.0, res.x[0], 0.0, 0.0, 0.0]
+
+        final_p = BatesAnalyticalPricerFast.price_vectorized(self.S0, strikes, maturities, r_vec, q_vec, types, *final_prms, silent=True)
+        rmse_dollars = np.sqrt(np.mean((final_p - market_prices)**2))
+        
+        return {
+            **dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], final_prms)), 
+            "weighted_obj": res.fun,
+            "rmse": rmse_dollars 
+        }
+    
 class BatesCalibratorMC:
     def __init__(self, S0, r_curve, q_curve, n_paths=20000, n_steps=250):
         self.S0, self.r_curve, self.q_curve = S0, r_curve, q_curve
@@ -138,19 +279,44 @@ class BatesCalibratorMCFast(BatesCalibratorMC):
         payoffs = np.where(self.f_is_call, np.maximum(st * dr - self.f_strikes, 0.), np.maximum(self.f_strikes - st * dr, 0.))
         return np.mean(payoffs * np.exp(-self.f_rates * self.f_maturities), axis=0), self.f_market_prices, self.f_weights
 
-    def calibrate(self, options, sigma_cap=2.0):
+    def calibrate(self, options, sigma_cap=2.0, model="Bates"):
         self._precompute(options, sigma_cap)
-        bnds = [(1.0, 5.0), (0.001, 0.5), (0.01, 0.9), (-0.99, 0.0), (0.001, 0.1), (0.0, 0.5), (-0.3, 0.0), (0.05, 0.3)]
-        x0 = [1.5, 0.25, 0.6, -0.2, 0.21, 0.5, -0.05, 0.2]
+        
+        if model == "Bates":
+            x0 = [1.5, 0.25, 0.6, -0.2, 0.21, 0.5, -0.05, 0.2]
+            bnds = [(1.0, 5.0), (0.001, 0.5), (0.01, 0.9), (-0.99, 0.0), (0.001, 0.1), (0.0, 0.5), (-0.3, 0.0), (0.05, 0.3)]
+        elif model == "Heston":
+            x0 = [1.5, 0.25, 0.6, -0.2, 0.21]
+            bnds = [(1.0, 5.0), (0.001, 0.5), (0.01, 0.9), (-0.99, 0.0), (0.001, 0.1)]
+        elif model == "BS":
+            x0 = [0.21]
+            bnds = [(0.001, 0.1)]
         
         def obj(p):
             try:
-                mp, mkp, w = self.get_prices(p)
+                if model == "Bates": p_eval = p
+                elif model == "Heston": p_eval = [p[0], p[1], p[2], p[3], p[4], 0.0, 0.0, 0.0]
+                elif model == "BS": p_eval = [1e-4, p[0], 1e-4, 0.0, p[0], 0.0, 0.0, 0.0]
+                mp, mkp, w = self.get_prices(p_eval)
                 if np.any(np.isnan(mp)) or np.any(mp < 0): return 1e10
                 return np.sqrt(np.mean(((mp - mkp) * w)**2))
             except: return 1e12
 
-        res = minimize(obj, x0, method='L-BFGS-B', bounds=bnds, tol=1e-8, options={'eps': 1e-3, 'maxiter': 250})
-        final_p, _, _ = self.get_prices(res.x)
-        return {**dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], res.x)), 
+        def callback(xk):
+            w_obj = obj(xk)
+            if model == "Bates":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
+            elif model == "Heston":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
+            elif model == "BS":
+                print(f"   [Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
+
+        res = minimize(obj, x0, method='L-BFGS-B', bounds=bnds, callback=callback, tol=1e-8, options={'eps': 1e-3, 'maxiter': 250})
+        
+        if model == "Bates": final_prms = res.x
+        elif model == "Heston": final_prms = [res.x[0], res.x[1], res.x[2], res.x[3], res.x[4], 0.0, 0.0, 0.0]
+        elif model == "BS": final_prms = [1e-4, res.x[0], 1e-4, 0.0, res.x[0], 0.0, 0.0, 0.0]
+        
+        final_p, _, _ = self.get_prices(final_prms)
+        return {**dict(zip(['kappa', 'theta', 'xi', 'rho', 'v0', 'lamb', 'mu_j', 'sigma_j'], final_prms)), 
                 "weighted_obj": res.fun, "rmse": float(np.sqrt(np.mean((final_p - self.f_market_prices)**2)))}
