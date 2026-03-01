@@ -11,9 +11,14 @@ dependencies = [
     "scipy",
     "numba",
     "matplotlib",
-    "pytest",
-    "yfinance"  
+    "pandas",
+    "requests",
+    "scikit-learn",
+    "nelson-siegel-svensson",
+    "yfinance",
 ]
+[project.optional-dependencies]
+dev = ["pytest", "pytest-cov"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,116 +1,80 @@
-# HestonPricer: High-Performance Stochastic Volatility Engine
+# `batespricer`
 
-**A JIT-compiled pricing and calibration library for Exotic Derivatives, bridging the gap between mathematical theory (Shreve/Hull) and production engineering.**
+Option pricer and calibrator under the Bates stochastic volatility model. Calibrates to live market data, prices vanillas and path-dependent exotics, and computes Greeks.
 
-## Key Capabilities
+The Bates model extends Heston by adding Merton log-normal jumps to the asset price process. This captures both the volatility smile at shorter maturities and the skew at longer maturities. For a detailed description of the methodology and results, see the [report](batespricer.pdf).
 
-* **Real-Time Calibration**: Solves the inverse problem for Heston parameters ($\kappa, \theta, \xi, \rho, v_0$) using **L-BFGS-B** optimization against live option chains (e.g., NVDA, TSLA).
-* **HPC Architecture**: Python loops are replaced with **Numba** kernels (LLVM compilation), achieving a **~16x speedup** over Pure Python and **2.5x speedup** over vectorized NumPy by eliminating memory overhead.
-* **Exotic Pricing**: Supports path-dependent payoffs including **Barrier (Knock-Out/Knock-In)** and **Arithmetic Asian** options.
-* **Risk Management**: Computes **Delta, Gamma, and Vega** via Finite Difference, correctly capturing "Negative Gamma" risks near barriers.
-* **Mathematical Rigor**: Implements **Gil-Pelaez Fourier Inversion** for fast calibration and **Full Truncation Euler** discretization for simulation stability.
+## Pricing and calibration
 
----
-## Architectural Decisions
+Two pricing approaches are implemented. A semi-analytical direct integration method uses the Attari (2004) formulation with Gauss-Legendre quadrature and maturity-based caching. A Monte Carlo simulation uses full truncation (Lord et al., 2010) and quadratic exponential (Andersen, 2008) discretization schemes. Calibration is formulated as spread-weighted nonlinear least squares, solved with L-BFGS-B and SLSQP. The accelerated semi-analytical calibration converges in under 10 seconds. Calibrated to 300 OTM options per asset, the semi-analytical approach achieves a price RMSE of 4.84 bps for the S&P 500 and 6.28 bps for Apple.
 
-### Design Choice: Feller-Constrained Euler vs. QE Scheme
-While the **Quadratic Exponential (QE)** scheme (Andersen, 2008) is the industry standard for low-bias Heston simulation, this library implements a **Full Truncation Euler** scheme optimized for speed.
+The calibrated parameters are applied to exotic options. Results under the Bates model for the S&P 500 and Apple (T = 1, K = 1.05 · S₀, B = 0.8 · S₀):
 
-**Engineering Justification:**
-1.  **Optimization Constraints:** We enforce the Feller condition ($2\kappa\theta > \xi^2$) as a soft penalty during the calibration phase. This constrains the parameter search space to regimes where the variance process remains strictly positive.
-2.  **Performance Gain:** By avoiding the conditional branching and inverse CDF calls required by QE, the vectorized Euler kernel achieves a **~15% reduction in calibration time**.
-3.  **Accuracy Validation:** Extensive A/B testing on live market data (NVDA, ASML) confirms that in this Feller-compliant regime, the Euler discretization bias is negligible (< 0.1% RMSE difference vs Analytical benchmarks).
+| | | SPX ($6,923) | | | AAPL ($278) | | |
+|---|---|---|---|---|---|---|---|
+| **Product** | **Price** | **Δ** | **Γ** | **Price** | **Δ** | **Γ** | **V**_var |
+| European call | $406.02 | 0.633 | 0.0004 | $28.03 | 0.607 | 0.0060 | 97.50 |
+| Down&Out call | $393.46 | 0.636 | 0.0004 | $26.38 | 0.630 | 0.0046 | 70.93 |
+| Down&In call | $12.56 | −0.003 | 0.0000 | $1.65 | −0.023 | 0.0014 | 26.57 |
+| Asian call | $134.46 | 0.466 | 0.0009 | $12.32 | 0.490 | 0.0112 | 85.89 |
 
-*Result: A lighter, faster codebase that maintains pricing precision for Equity Volatility surfaces.*
-----
+## Package structure
 
-## Case Study: NVIDIA (NVDA) Down-and-Out Call
-
-**Calibration Date:** Jan 25, 2026
-* **Scenario:** Spot \$187.67 | Strike \$197.05 | Barrier \$150.14 (1yr Maturity)
-* **Barrier Risk:** The engine correctly computes **Negative Gamma** ($\Gamma \approx -0.008$), quantifying the "slippage" risk where the delta hedge collapses as the spot approaches the knock-out level.
-* **Volatility Exposure:** Despite the barrier, the model identifies a **Positive Vega** ($+18.47$). This indicates that for this specific moneyness, the increased probability of hitting the strike (upside) outweighs the increased probability of hitting the barrier (knock-out).
----
-
-## Performance Benchmarks
-
-*Hardware: Standard Consumer Laptop (Python 3.12)*
-*Simulation: 2,000,000 Paths, 252 Steps (Daily Monitoring)*
-
-| Implementation | Execution Time | Speedup vs Python | Speedup vs NumPy |
-| :--- | :--- | :--- | :--- |
-| **Pure Python** | ~610 s (Est.) | 1.0x | - |
-| **NumPy Vectorized** | 94.63 s | 6.4x | 1.0x |
-| **HestonPricer (Numba)** | **38.38 s** | **~15.9x** | **2.5x** |
-
-*Note: Numba JIT compiles the Monte Carlo kernel to machine code, eliminating memory allocation overhead for intermediate path arrays which bottlenecks NumPy at high scale.*
-
----
+```
+src/batespricer/
+├── analytics.py        # Semi-analytical pricers (naive midpoint + cached Gauss-Legendre)
+├── calibration.py      # BatesCalibrator, BatesCalibratorFast,
+│                         BatesCalibratorMC, BatesCalibratorMCFast
+├── data.py             # FRED yield curves (NSS-OLS), implied dividends, yfinance
+├── instruments.py      # European, Asian, Barrier (Down-and-Out/In)
+├── market.py           # MarketEnvironment dataclass
+└── models/
+    ├── mc_kernels.py   # Numba-JIT path generators (full truncation + QE)
+    ├── mc_pricer.py    # Monte Carlo pricer with CRN-based finite difference Greeks
+    └── process.py      # Black-Scholes, Heston, Bates process definitions
+```
 
 ## Usage
 
-### 1. Market Calibration (The "Strat" View)
-Fetches live option chains, filters for liquidity, and performs a dual-phase calibration (Analytical Fourier → Monte Carlo refinement).
 ```bash
-python examples/1_market_calibration.py
-```
-*Output: Saves `calibration_[TICKER]_[DATE]_meta.json` and reports IV-RMSE.*
-
-### 2. Exotic Pricing & Risk (The "Structuring" View)
-Loads the calibrated parameters to price a **Down-and-Out Call** and an **Arithmetic Asian Call**, including full Greeks.
-```bash
-python examples/2_exotic_pricing.py
-```
-*Output: Prices, Delta, Gamma, Vega.*
-
-### 3. Convergence & Benchmarking (The "Quant Dev" View)
-Validates the numerical stability of the engine and benchmarks Numba performance.
-```bash
-python examples/3_convergence_analysis.py
-```
-*Output: Speedup metrics and Fourier vs. MC error analysis.*
-
----
-
-## 📚 Mathematical Methodology
-
-**1. Geometric Brownian Motion (Black-Scholes)**
-Standard risk-neutral discretization for an asset with risk-free rate $r$ and dividend yield $q$:
-$$S_{t+\Delta t} = S_t \exp\left( (r - q - \frac{1}{2}\sigma^2)\Delta t + \sigma \sqrt{\Delta t} Z \right)$$
-
-**2. Heston Stochastic Volatility Model**
-Modeled via two correlated Stochastic Differential Equations (SDEs) to capture volatility clustering and skew (leverage effect):
-
-$$dS_t = (r - q) S_t dt + \sqrt{v_t} S_t dW_S$$
-$$dv_t = \kappa (\theta - v_t) dt + \xi \sqrt{v_t} dW_v$$
-$$\text{Corr}(dW_S, dW_v) = \rho$$
-
-* **$\rho$ (Correlation):** Controls the **Skew**. A negative $\rho$ (e.g., -0.7) means when Spot falls, Volatility spikes (Crash Risk).
-* **$\xi$ (Vol of Vol):** Controls the **Smile** (Kurtosis/Fat Tails).
-* **$\kappa$ (Mean Reversion):** The speed at which variance returns to the long-run average $\theta$.
-
-**3. Exotic Payoffs**
-* **Asian Option**: Payoff depends on the arithmetic mean of the path: $\max(\frac{1}{N}\sum S_{t_i} - K, 0)$.
-* **Barrier Option**: Path-dependent activation. The option creates (Knock-In) or destroys (Knock-Out) value if $S_t$ breaches a barrier $B$ at any time $t$.
-
----
-
-## Installation
-
-```bash
-git clone [https://github.com/LCVlieger/heston_pricer](https://github.com/LCVlieger/heston_pricer)
+git clone https://github.com/LCVlieger/batespricer
+cd batespricer
 pip install -e .
 ```
 
-## Testing
+**Calibrate to market data:**
+```bash
+python examples/1a_market_calibration_Ana_naive.py
+python examples/1b_market_calibration_Ana_accelerated.py
+python examples/1c_market_calibration_MC_naive.py
+python examples/1d_market_calibration_MC_accelerated.py
+```
 
-The library includes a regression test suite to ensure mathematical accuracy.
+**Price exotics under calibrated parameters:**
+```bash
+python examples/2_exotic_pricing.py
+```
+
+## Tests
 
 ```bash
-pytest tests/test_pricing.py -v
+pytest tests/ -v
 ```
 
-* **Convergence Checks**: Verifies that Monte Carlo estimates converge to the exact Black-Scholes price (European) and Turnbull-Wakeman approximation (Asian).
-* **Parity checks**: Validates logical consistency, such as **Put-Call Parity**.
+Validates European call convergence to Black-Scholes, Asian call convergence to Turnbull-Wakeman, and put-call parity.
 
-```
+## References
+
+- Black, F. and Scholes, M. (1973). The pricing of options and corporate liabilities. *J. Political Economy*, 81(3), 637–654.
+- Merton, R.C. (1976). Option pricing when underlying stock returns are discontinuous. *J. Financial Economics*, 3(1-2), 125–144.
+- Gil-Pelaez, J. (1951). Note on the inversion theorem. *Biometrika*, 38(3-4), 481–482.
+- Nelson, C.R. and Siegel, A.F. (1987). Parsimonious modeling of yield curves. *J. Business*, 60(4), 473–489.
+- Turnbull, S.M. and Wakeman, L.M. (1991). A quick algorithm for pricing European average options. *J. Financial and Quantitative Analysis*, 26(3), 377–389.
+- Heston, S. (1993). A closed-form solution for options with stochastic volatility. *Review of Financial Studies*, 6(2), 327–343.
+- Svensson, L.E.O. (1994). Estimating and interpreting forward interest rates: Sweden 1992–1994. *NBER Working Paper* 4871.
+- Bates, D.S. (1996). Jumps and stochastic volatility: exchange rate processes implicit in Deutsche Mark options. *Review of Financial Studies*, 9(1), 69–107.
+- Carr, P. and Madan, D.B. (1999). Option valuation using the fast Fourier transform. *J. Computational Finance*, 2(4), 61–73.
+- Attari, M. (2004). Option pricing using Fourier transforms: a numerically efficient simplification. *SSRN Working Paper*.
+- Albrecher, H. et al. (2007). The little Heston trap. *Wilmott Magazine*, Jan, 83–92.
+- Andersen, L. (2008). Efficient simulation of the Heston stochastic volatility model. *J. Computational Finance*, 11(3), 1–22.
+- Lord, R. et al. (2010). A comparison of biased simulation schemes for stochastic volatility models. *Quantitative Finance*, 10(2), 177–194.

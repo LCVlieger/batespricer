@@ -1,1 +1,2 @@
 # required libraries: numpy, scipy, numba, matplotlib, pytest, yfinance
+pip freeze > requirements.txt
