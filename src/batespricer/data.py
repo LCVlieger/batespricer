@@ -15,6 +15,7 @@ BOX_SPREAD = 0.0045
 
 @dataclass
 class MarketOption:
+    """Single market-observed option with mid price and bid-ask spread."""
     strike: float
     maturity: float
     market_price: float
@@ -35,6 +36,7 @@ def load_options_from_cache(filepath: str) -> List[MarketOption]:
         return [MarketOption(**item) for item in json.load(f)]
 
 class NSSYieldCurve:
+    """Nelson-Siegel-Svensson interpolated yield curve from FRED."""
     def __init__(self, curve_fit, spread=0.0):
         self.curve = curve_fit
         self.spread = spread
@@ -46,6 +48,7 @@ class NSSYieldCurve:
         return {f"{round(t,3)}Y": self.get_rate(t) for t in [0.08, 0.25, 0.5, 1.0]}
 
 def fetch_treasury_rates_fred(date_str: str, api_key: str) -> NSSYieldCurve:
+    """Fetch UST rates from FRED and fit NSS curve via OLS."""
     series = {1/12: "DGS1MO", 3/12: "DGS3MO", 6/12: "DGS6MO", 1.0: "DGS1", 2.0: "DGS2"}
     target_dt = datetime.strptime(date_str, "%Y-%m-%d")
     
@@ -78,6 +81,7 @@ def calculate_spx_time_to_maturity(expiry: datetime, ticker: str) -> float:
     return max(delta.total_seconds() / (365.25 * 24 * 3600), 1e-6)
 
 class ImpliedDividendCurve:
+    """Term structure of dividend yields implied from put-call parity."""
     def __init__(self, df: pd.DataFrame, S0: float, r_curve, ticker: str = ""):
         self.yields = {}
         is_index = ticker.startswith("^") or ticker in ["SPX", "NDX", "RUT"]
@@ -153,6 +157,7 @@ def get_market_implied_spot(ticker_symbol: str, raw_df: pd.DataFrame, r_curve) -
     return float(t_obj.history(period="1d")['Close'].iloc[-1])
 
 def fetch_options(ticker_symbol: str, S0: float, target_size: int = 300) -> List[MarketOption]:
+    """Download OTM option chain and filter by liquidity."""
     if np.isnan(S0): return []
     t_obj = yf.Ticker(ticker_symbol)
     exps = [e for e in getattr(t_obj, 'options', []) if 0.04 <= calculate_spx_time_to_maturity(datetime.strptime(e, "%Y-%m-%d"), ticker_symbol) <= 1.3]

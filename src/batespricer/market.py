@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 @dataclass
 class MarketEnvironment:
+    """Spot, rates, and stochastic vol / jump parameters for a single underlier."""
     S0: float          
     r: float           
     q: float = 0.0     

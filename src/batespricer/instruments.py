@@ -8,6 +8,7 @@ class OptionType(Enum):
     PUT = -1
 
 class Option(ABC):
+    """Base class for payoff definitions."""
     def __init__(self, K: float, T: float, option_type: OptionType):
         self.K, self.T, self.option_type = K, T, option_type
 
@@ -16,11 +17,13 @@ class Option(ABC):
         pass
 
 class EuropeanOption(Option):
+    """Vanilla European payoff at expiry."""
     def payoff(self, prices: np.ndarray) -> np.ndarray:
         S_T, phi = prices[:, -1], self.option_type.value
         return np.maximum(phi * (S_T - self.K), 0)
     
 class AsianOption(Option):
+    """Arithmetic average-price Asian payoff."""
     def payoff(self, prices: np.ndarray) -> np.ndarray:
         avg_S, phi = np.mean(prices[:, 1:], axis=1), self.option_type.value
         return np.maximum(phi * (avg_S - self.K), 0)
@@ -31,6 +34,7 @@ class BarrierType(Enum):
     UP_AND_OUT = 3
     UP_AND_IN = 4
 class BarrierOption(Option):
+    """Down-and-Out / Down-and-In barrier with optional smooth payoff."""
     def __init__(self, K: float, T: float, barrier: float, barrier_type: BarrierType, option_type: OptionType):
         super().__init__(K, T, option_type)
         self.barrier, self.barrier_type = barrier, barrier_type
@@ -65,11 +69,3 @@ class BarrierOption(Option):
             
         else:
             raise NotImplementedError("Only Down-and-Out and Down-and-In are supported")
-
-    
-@dataclass
-class MarketOption:
-    strike: float
-    maturity: float
-    market_price: float
-    option_type: OptionType = OptionType.CALL

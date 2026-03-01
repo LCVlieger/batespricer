@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import time
 import numpy as np
 import pandas as pd
@@ -13,12 +14,13 @@ from batespricer.data import (
     get_market_implied_spot, ImpliedDividendCurve, 
     save_options_to_cache, load_options_from_cache
 )
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 def save_results(ticker, S0, r_curve, q_curve, res_params, options):
     os.makedirs("results", exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = f"results/calibration_Analytic_{ticker}_{timestamp}"
-    
+        
     tenors = [(0.02, "1w"), (0.04, "2w"), (0.0833, "1M"), (0.25, "3M"), (0.5, "6M"), (1.0, "1Y")]
     r_sample = {f"{t:.4f}Y": float(r_curve.get_rate(t)) for t, _ in tenors}
     q_sample = {f"{t:.4f}Y": float(q_curve.get_rate(t)) for t, _ in tenors}

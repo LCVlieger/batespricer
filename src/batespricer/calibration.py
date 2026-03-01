@@ -1,3 +1,4 @@
+import logging
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Tuple
@@ -6,6 +7,8 @@ from scipy.stats import norm
 from numba import njit, prange
 from .analytics import BatesAnalyticalPricer, BatesAnalyticalPricerFast
 from .models.mc_kernels import generate_bates_paths_crn, generate_bates_qe_slices_crn
+
+logger = logging.getLogger(__name__)
 
 @njit(parallel=True, fastmath=True)
 def _numba_price_engine(paths, time_idxs, strikes, is_calls, rates, qs, drift_corr, maturities):
@@ -27,6 +30,7 @@ def _numba_price_engine(paths, time_idxs, strikes, is_calls, rates, qs, drift_co
     return prices
 
 class BatesCalibrator:
+    """Spread-weighted L-BFGS-B calibration using the naive midpoint pricer."""
     def __init__(self, S0: float, r_curve, q_curve):
         self.S0 = S0
         self.r_curve = r_curve
@@ -42,7 +46,7 @@ class BatesCalibrator:
         d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         return S * np.exp(-q * T) * norm.pdf(d1) * np.sqrt(T)
 
-    def calibrate(self, options: List, sigma_cap=2.0, model="Bates") -> Dict:
+    def calibrate(self, options: List, sigma_cap: float = 2.0, model: str = "Bates") -> Dict[str, float]:
         strikes = np.array([o.strike for o in options])
         mats = np.array([o.maturity for o in options])
         mkt_p = np.array([o.market_price for o in options])
@@ -76,11 +80,11 @@ class BatesCalibrator:
         def callback(xk):
             w_obj = obj(xk)
             if model == "Bates":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
             elif model == "Heston":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
             elif model == "BS":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
 
         res = minimize(obj, x0, method='L-BFGS-B', bounds=bnds, callback=callback, tol=1e-8, options={'eps': 1e-4, 'maxiter': 500})
         
@@ -94,10 +98,7 @@ class BatesCalibrator:
                 "weighted_obj": res.fun, "rmse": np.sqrt(np.mean((final_p - mkt_p)**2))}
     
 class BatesCalibratorFast:
-    """
-    Calibrates Bates (Heston + Jumps) model parameters using L-BFGS-B optimization.
-    Wired to use the ultra-fast Cached Gauss-Legendre pricer.
-    """
+    """Spread-weighted L-BFGS-B calibration using the cached Gauss-Legendre pricer."""
     
     def __init__(self, S0, r_curve, q_curve):
         self.S0 = S0
@@ -119,7 +120,7 @@ class BatesCalibratorFast:
         d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         return S * np.exp(-q * T) * norm.pdf(d1) * np.sqrt(T)
 
-    def calibrate(self, options, sigma_cap=2.0, model="Bates"):
+    def calibrate(self, options: List, sigma_cap: float = 2.0, model: str = "Bates") -> Dict[str, float]:
         strikes = np.array([o.strike for o in options])
         maturities = np.array([o.maturity for o in options])
         market_prices = np.array([o.market_price for o in options])
@@ -178,14 +179,11 @@ class BatesCalibratorFast:
         def callback(xk):
             w_obj = objective(xk)
             if model == "Bates":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | "
-                      f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}| "
-                      f"L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
             elif model == "Heston":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | "
-                      f"k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
             elif model == "BS":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
 
         res = minimize(
             objective, 
@@ -211,7 +209,8 @@ class BatesCalibratorFast:
         }
     
 class BatesCalibratorMC:
-    def __init__(self, S0, r_curve, q_curve, n_paths=20000, n_steps=250):
+    """Full truncation Euler MC calibration with CRN antithetics."""
+    def __init__(self, S0: float, r_curve, q_curve, n_paths: int = 20000, n_steps: int = 250):
         self.S0, self.r_curve, self.q_curve = S0, r_curve, q_curve
         self.n_paths, self.n_steps = n_paths + (n_paths % 2), n_steps
         self.z_noise = None
@@ -250,7 +249,8 @@ class BatesCalibratorMC:
         return mod_p, self.f_market_prices, self.f_weights
 
 class BatesCalibratorMCFast(BatesCalibratorMC):
-    def __init__(self, S0, r_curve, q_curve, n_paths=5000, n_steps_per_year=365):
+    """QE-based MC calibration with slice pricing (Andersen 2008)."""
+    def __init__(self, S0: float, r_curve, q_curve, n_paths: int = 5000, n_steps_per_year: int = 365):
         super().__init__(S0, r_curve, q_curve, n_paths, n_steps_per_year)
 
     def _precompute(self, options, sigma_cap=2.0):
@@ -279,7 +279,7 @@ class BatesCalibratorMCFast(BatesCalibratorMC):
         payoffs = np.where(self.f_is_call, np.maximum(st * dr - self.f_strikes, 0.), np.maximum(self.f_strikes - st * dr, 0.))
         return np.mean(payoffs * np.exp(-self.f_rates * self.f_maturities), axis=0), self.f_market_prices, self.f_weights
 
-    def calibrate(self, options, sigma_cap=2.0, model="Bates"):
+    def calibrate(self, options: List, sigma_cap: float = 2.0, model: str = "Bates") -> Dict[str, float]:
         self._precompute(options, sigma_cap)
         
         if model == "Bates":
@@ -305,11 +305,11 @@ class BatesCalibratorMCFast(BatesCalibratorMC):
         def callback(xk):
             w_obj = obj(xk)
             if model == "Bates":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f} | L:{xk[5]:.2f} muJ:{xk[6]:.2f} sJ:{xk[7]:.2f}")
             elif model == "Heston":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | k:{xk[0]:.1f} th:{xk[1]:.3f} xi:{xk[2]:.2f} rho:{xk[3]:.2f} v0:{xk[4]:.2f}")
             elif model == "BS":
-                print(f"   [Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
+                logger.info(f"[Step] W-Obj: {w_obj:.4f} | v0:{xk[0]:.4f}")
 
         res = minimize(obj, x0, method='L-BFGS-B', bounds=bnds, callback=callback, tol=1e-8, options={'eps': 1e-3, 'maxiter': 250})
         

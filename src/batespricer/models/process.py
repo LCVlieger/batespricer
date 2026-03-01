@@ -11,6 +11,7 @@ from .mc_kernels import (
 )
 
 class StochasticProcess(ABC):
+    """Base class for path-generating stochastic processes."""
     def __init__(self, market: MarketEnvironment):
         self.market = market
 
@@ -19,11 +20,13 @@ class StochasticProcess(ABC):
         pass
 
 class BlackScholesProcess(StochasticProcess):
+    """GBM with constant volatility."""
     def generate_paths(self, T: float, n_paths: int, n_steps: int) -> np.ndarray:
         m = self.market
         return generate_paths_kernel(m.S0, m.r, m.q, m.sigma, T, n_paths, n_steps)
 
 class HestonProcess(StochasticProcess):
+    """Heston (1993) stochastic variance with full truncation."""
     def generate_paths(self, T: float, n_paths: int, n_steps: int, noise=None) -> np.ndarray:
         m = self.market
         args = (m.S0, m.r, m.q, m.v0, m.kappa, m.theta, m.xi, m.rho, T, n_paths, n_steps)
@@ -33,6 +36,7 @@ class HestonProcess(StochasticProcess):
         return generate_heston_paths(*args)
     
 class BatesProcess(StochasticProcess):
+    """Heston + Merton log-normal jumps (Bates 1996)."""
     @property
     def noise_channels(self) -> int:
         return 4 

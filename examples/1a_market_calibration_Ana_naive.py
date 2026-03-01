@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import time
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ from batespricer.data import (
     get_market_implied_spot, ImpliedDividendCurve, 
     save_options_to_cache, load_options_from_cache
 )
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 
 def save_results(ticker, S0, r_curve, q_curve, res_params, options):
     os.makedirs("results", exist_ok=True)

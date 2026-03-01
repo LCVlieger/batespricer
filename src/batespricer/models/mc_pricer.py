@@ -12,9 +12,12 @@ class PricingResult:
     conf_interval_95: tuple[float, float]
 
 class MonteCarloPricer:
+    """Prices options by Monte Carlo simulation of a stochastic process."""
     def __init__(self, process: StochasticProcess):
         self.process = process
+
     def price(self, option: Option, n_paths: int = 10000, n_steps: int = 100, **kwargs) -> PricingResult:
+        """Discounted expected payoff with standard error."""
         epsilon = kwargs.pop('epsilon', None)
         
         paths = self.process.generate_paths(option.T, n_paths, n_steps, **kwargs)
@@ -35,6 +38,7 @@ class MonteCarloPricer:
             conf_interval_95=(mu - 1.96 * se, mu + 1.96 * se)
         )
     def compute_greeks(self, option: Option, n_paths: int = 10000, n_steps: int = 252, bump_ratio: float = 0.01, seed: int = 42) -> Dict[str, float]:
+        """CRN finite-difference Greeks: delta, gamma, vega_v0."""
         mkt = self.process.market
         S0, v0 = mkt.S0, mkt.v0
         eps_s, eps_v = S0 * bump_ratio, 0.001 
