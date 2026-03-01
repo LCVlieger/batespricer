@@ -1,7 +1,7 @@
 # `batespricer`
 Option pricer and calibrator for the Bates stochastic volatility jump-diffusion model. Calibrates to real-time options data, prices vanillas and path-dependent exotics, and computes Greeks. See the [report](batespricer.pdf) for the results and methodology.
 ## Pricing and calibration
-Two pricing methods are implemented. The semi-analytical approach uses Fourier inversion of the Albrecher (2007) characteristic function. Two approaches are implemented: midpoint direct integration and an accelerated version using Gauss-Legendre quadrature with maturity-based CF caching. The Monte Carlo approach uses full truncation (Lord et al., 2010) and quadratic exponential (Andersen, 2008) discretization. In the calibration the spread-weighted squared residuals are minimized, using the `L-BFGS-B` or `SLSQP` solvers. We calibrate to 300 OTM options per asset. The accelerated semi-analytical calibration converges in 10 seconds, with a price RMSE of 4.84 bps for the S&P 500 and 6.28 bps for Apple. Results under the calibrated Bates model (T = 1, K = 1.05 · S₀, B = 0.8 · S₀) are given by:
+Two pricing methods are implemented. The semi-analytical approach uses Fourier inversion of the Albrecher (2007) characteristic function. For this, two numerical approaches are implemented: midpoint direct integration and an accelerated version using Gauss-Legendre quadrature with maturity-based CF caching. The Monte Carlo approach uses full truncation (Lord et al., 2010) and quadratic exponential (Andersen, 2008) discretization. In the calibration the spread-weighted squared residuals are minimized, using the `L-BFGS-B` or `SLSQP` solvers. We calibrate to 300 OTM options per asset. The accelerated semi-analytical calibration converges in 10 seconds, with a price RMSE of 4.84 bps for the S&P 500 and 6.28 bps for Apple. Results under the calibrated Bates model (T = 1, K = 1.05 · S₀, B = 0.8 · S₀) are given by:
 | | | SPX ($6,923) | | | | AAPL ($278) | | |
 |---|---|---|---|---|---|---|---|---|
 | **Product** | **Price** | **Δ** | **Γ** | **V**_var | **Price** | **Δ** | **Γ** | **V**_var |
@@ -31,11 +31,12 @@ pip install -e .
 ```
 **Calibrate to market data for the four implementations:**
 ```bash
-python examples/1_calibration.ipynb
+jupyter lab examples/1_calibration.ipynb
 ```
 **Price exotics under calibrated parameters:**
 ```bash
-python examples/2_exotic_pricing.ipynb
+jupyter lab examples/2_exotic_pricing.ipynb
+
 ```
 ## Tests
 ```bash

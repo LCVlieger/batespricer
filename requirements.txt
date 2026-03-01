@@ -1,1 +1,0 @@
-# required libraries: numpy, scipy, numba, matplotlib, pytest, yfinance
