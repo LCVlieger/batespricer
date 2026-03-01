@@ -29,16 +29,13 @@ git clone https://github.com/LCVlieger/batespricer
 cd batespricer
 pip install -e .
 ```
-**Calibrate to market data:**
+**Calibrate to market data for the four implementations:**
 ```bash
-python examples/1a_market_calibration_Ana_naive.py
-python examples/1b_market_calibration_Ana_accelerated.py
-python examples/1c_market_calibration_MC_naive.py
-python examples/1d_market_calibration_MC_accelerated.py
+python examples/1_calibration.ipynb
 ```
 **Price exotics under calibrated parameters:**
 ```bash
-python examples/2_exotic_pricing.py
+python examples/2_exotic_pricing.ipynb
 ```
 ## Tests
 ```bash
